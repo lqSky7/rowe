@@ -155,10 +155,13 @@ struct IOSHomeView: View {
                                 }
                                 .matchedTransitionSource(id: "doc-\(doc.id)", in: zoomNamespace)
                                 .contextMenu { documentContextMenu(doc) }
+                                .transition(.roweUnblur)
                             }
                         }
+                        .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: activeDocs.map(\.id))
                         .padding(.horizontal, 18)
                     }
+                    .transition(.roweUnblur)
                 }
 
                 // Navigation Rows
@@ -251,7 +254,9 @@ struct IOSHomeView: View {
             }
             Button(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star") {
                 IOSHaptics.shared.toggle()
-                store.toggleStarDocument(docId: doc.id)
+                withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                    store.toggleStarDocument(docId: doc.id)
+                }
             }
             Button(doc.isLocked ? "Unlock / Re-lock" : "Lock with PIN", systemImage: doc.isLocked ? "lock.open" : "lock") {
                 IOSHaptics.shared.tap()
@@ -261,17 +266,23 @@ struct IOSHomeView: View {
         Section {
             Menu("Move to Folder", systemImage: "folder") {
                 Button("All Docs (None)", systemImage: doc.folderId == nil ? "checkmark" : "tray") {
-                    store.moveDocument(docId: doc.id, toFolderId: nil)
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        store.moveDocument(docId: doc.id, toFolderId: nil)
+                    }
                 }
                 ForEach(store.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { folder in
                     Button(folder.name, systemImage: doc.folderId == folder.id ? "checkmark" : folder.iconName) {
-                        store.moveDocument(docId: doc.id, toFolderId: folder.id)
+                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                            store.moveDocument(docId: doc.id, toFolderId: folder.id)
+                        }
                     }
                 }
             }
             Button("Duplicate", systemImage: "plus.square.on.square") {
                 IOSHaptics.shared.tap()
-                store.duplicateDocument(docId: doc.id)
+                withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                    store.duplicateDocument(docId: doc.id)
+                }
             }
             Button("Copy Title", systemImage: "doc.on.doc") {
                 IOSHaptics.shared.tap()
@@ -281,7 +292,9 @@ struct IOSHomeView: View {
         Section {
             Button("Move to Trash", systemImage: "trash", role: .destructive) {
                 IOSHaptics.shared.destructive()
-                store.moveDocumentToTrash(docId: doc.id)
+                withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                    store.moveDocumentToTrash(docId: doc.id)
+                }
             }
         }
     }
