@@ -225,6 +225,9 @@ final class CompactTabBarController: UITabBarController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        tabBar.itemPositioning = .centered
+        tabBar.itemSpacing = 22
+        tabBar.itemWidth = 60
         #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             tabBarMinimizeBehavior = .never
@@ -234,7 +237,9 @@ final class CompactTabBarController: UITabBarController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let targetWidth = min(max(176, view.bounds.width * 0.45), 220)
+        // Generous spacing between the 3 icons while keeping clean clearance before the trailing '+' button
+        let maxAvailable = max(210, view.bounds.width - 104)
+        let targetWidth = min(max(244, view.bounds.width * 0.64), min(280, maxAvailable))
         let currentFrame = tabBar.frame
         let xPosition: CGFloat = 18
 

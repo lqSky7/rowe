@@ -108,12 +108,7 @@ struct IOSSettingsView: View {
             }
             .padding(.bottom, 50)
         }
-        .refreshable {
-            IOSHaptics.shared.snap()
-            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                store.isQuickOpenPresented = true
-            }
-        }
+        .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: store.settings.reduceAnimations)
         .toolbar(.hidden, for: .navigationBar)
     }
 

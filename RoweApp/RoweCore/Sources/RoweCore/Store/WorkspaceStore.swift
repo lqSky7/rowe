@@ -234,7 +234,9 @@ public final class WorkspaceStore {
             self.tags = loaded.tags
             self.sidebarSections = loaded.sidebarSections
             self.documents = loaded.documents
-            self.sharedDocuments = loaded.sharedDocuments
+            self.sharedDocuments = loaded.sharedDocuments.filter {
+                !($0.title == "Shared Feature Roadmap" && $0.sharedByName == "Collaborator")
+            }
             self.connections = loaded.connections
             self.settings = loaded.settings
             self.vaultEnvelope = loaded.vaultEnvelope
@@ -1354,6 +1356,11 @@ public final class WorkspaceStore {
 
     public func deleteConnection(id: String) {
         connections.removeAll(where: { $0.id == id })
+        schedulePersistence()
+    }
+
+    public func removeSharedDocument(id: String) {
+        sharedDocuments.removeAll(where: { $0.id == id })
         schedulePersistence()
     }
 

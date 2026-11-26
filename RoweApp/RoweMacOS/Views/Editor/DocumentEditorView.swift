@@ -131,6 +131,11 @@ struct DocumentEditorView: View {
                                                         store.enterInlineEditing(blockId: first.id, utf16Offset: 0)
                                                     }
                                                 }
+                                                .onChange(of: isTitleFocused) { _, focused in
+                                                    if focused && !store.selectedBlockIds.isEmpty {
+                                                        store.clearBlockSelection()
+                                                    }
+                                                }
                                             }
 
                                             LazyVStack(alignment: .leading, spacing: 4) {
@@ -163,7 +168,10 @@ struct DocumentEditorView: View {
                                                     .frame(height: segments.count > 1 ? 80 : 180)
                                                     .contentShape(Rectangle())
                                                     .onTapGesture {
-                                                        store.clearBlockSelection()
+                                                        if !store.selectedBlockIds.isEmpty {
+                                                            store.clearBlockSelection()
+                                                            return
+                                                        }
                                                         if let last = visibleBlocks.last, last.content.isEmpty && last.isEditableTextBlock {
                                                             store.enterInlineEditing(blockId: last.id, utf16Offset: 0)
                                                         } else {
@@ -180,6 +188,9 @@ struct DocumentEditorView: View {
                                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                                                     .fill(pageBackgroundColor)
                                                     .shadow(color: .black.opacity(0.10), radius: 18, y: 6)
+                                                    .onTapGesture {
+                                                        if !store.selectedBlockIds.isEmpty { store.clearBlockSelection() }
+                                                    }
                                             }
                                         }
                                         .environment(\.colorScheme, paperColorScheme)
@@ -192,6 +203,13 @@ struct DocumentEditorView: View {
                                 .padding(.horizontal, 28)
                                 .padding(.vertical, 16)
                                 .frame(maxWidth: .infinity)
+                                .background(
+                                    Color.clear
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            if !store.selectedBlockIds.isEmpty { store.clearBlockSelection() }
+                                        }
+                                )
                             }
                             .onChange(of: scrollTargetBlockId) { _, target in
                                 guard let target else { return }

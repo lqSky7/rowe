@@ -288,3 +288,65 @@ struct IOSDoodleSeparatorView: View {
         .frame(height: 14)
     }
 }
+
+/// Replaces SwiftUI's native spinning `.refreshable` loader with a clean magnifying-glass
+/// pull-down indicator that triggers Global Search prematurely (~48pt overscroll) without ever spinning.
+struct IOSPullDownToSearchModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let reduceMotion: Bool
+
+    @State private var pullDistance: CGFloat = 0
+    @State private var hasTriggered = false
+
+    private let triggerThreshold: CGFloat = 48
+
+    func body(content: Content) -> some View {
+        let progress = min(1.0, max(0.0, pullDistance / triggerThreshold))
+        content
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentOffset.y + geo.contentInsets.top
+            } action: { _, adjustedOffset in
+                let pulled = max(0, -adjustedOffset)
+                pullDistance = pulled
+                if pulled >= triggerThreshold && !hasTriggered && !isPresented {
+                    hasTriggered = true
+                    IOSHaptics.shared.snap()
+                    IOSKeyboard.dismiss()
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                        isPresented = true
+                    }
+                } else if pulled < 8 && hasTriggered {
+                    hasTriggered = false
+                }
+            }
+            .overlay(alignment: .top) {
+                if progress > 0.12 && !isPresented {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(progress >= 0.85 ? Color.accentColor : .primary)
+                        if progress > 0.55 {
+                            Text("Search")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                        }
+                    }
+                    .padding(.horizontal, progress > 0.55 ? 14 : 10)
+                    .frame(height: 34)
+                    .roweIOSGlassCapsule(interactive: false)
+                    .scaleEffect(0.68 + 0.32 * progress)
+                    .opacity(Double(min(1.0, progress * 1.4)))
+                    .padding(.top, 10)
+                    .allowsHitTesting(false)
+                    .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.85), value: progress > 0.55)
+                }
+            }
+    }
+}
+
+extension View {
+    func iosPullDownToSearch(isPresented: Binding<Bool>, reduceMotion: Bool = false) -> some View {
+        modifier(IOSPullDownToSearchModifier(isPresented: isPresented, reduceMotion: reduceMotion))
+    }
+}

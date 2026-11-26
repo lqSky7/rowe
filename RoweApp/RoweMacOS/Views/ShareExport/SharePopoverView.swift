@@ -86,14 +86,16 @@ struct SharePopoverView: View {
                     Image(systemName: "lock")
                         .font(.system(size: 11))
                     Text(accessPolicy)
-                        .font(.system(size: 11.5))
+                        .font(.system(size: 11.5, weight: .medium))
                         .lineLimit(1)
                 }
+                .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.primary.opacity(0.14)))
             }
             .menuStyle(.borderlessButton)
+            .tint(.secondary)
 
             Button {
                 HapticsManager.shared.tap()
@@ -106,9 +108,9 @@ struct SharePopoverView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Capsule().fill(Color(hex: "#46492E")))
+                    .background(Capsule().fill(Color.accentColor))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowePressScaleButtonStyle())
         }
     }
 
@@ -121,6 +123,7 @@ struct SharePopoverView: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
 
+            let previewInk = Color(hex: document.style.safeTextColorHex ?? "#1F2225")
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 180)
@@ -132,9 +135,10 @@ struct SharePopoverView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(document.displayTitle)
                                     .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(previewInk)
                                 Text(document.previewSnippet)
                                     .font(.system(size: 11.5))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(previewInk.opacity(0.65))
                                     .lineLimit(4)
                             }
                             .padding(26)
@@ -153,9 +157,9 @@ struct SharePopoverView: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
-                    .background(Capsule().fill(Color(hex: "#46492E")))
+                    .background(Capsule().fill(Color.accentColor))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RowePressScaleButtonStyle())
         }
     }
 

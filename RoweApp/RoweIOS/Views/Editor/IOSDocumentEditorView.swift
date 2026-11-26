@@ -345,13 +345,7 @@ struct IOSDocumentEditorView: View {
             .padding(.bottom, 180)
         }
         .scrollDismissesKeyboard(.interactively)
-        .refreshable {
-            IOSHaptics.shared.snap()
-            IOSKeyboard.dismiss()
-            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
-                store.isQuickOpenPresented = true
-            }
-        }
+        .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: reduceMotion)
     }
 
     // MARK: - Block Row with Swipe-Left to Select + Trailing Checkmark (IMG_5046)
@@ -481,6 +475,25 @@ struct IOSDocumentEditorView: View {
                                 .fill(Color.accentColor)
                                 .frame(width: 3.5)
                         }
+                    }
+
+                    let formulas = extractIOSFormulas(from: block.content)
+                    if !formulas.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(formulas.enumerated()), id: \.offset) { _, latex in
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    RoweMathView(latex: latex, fontSize: 15.5, inkColor: pageInkColor)
+                                        .padding(.vertical, 2)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(pageInkColor.opacity(0.06))
+                                )
+                            }
+                        }
+                        .padding(.top, 4)
                     }
                 }
             }
@@ -1117,6 +1130,23 @@ struct IOSDocumentEditorView: View {
         }
         segs.append(PageSegment(leadingBreakId: breakId, blocks: current))
         return segs
+    }
+
+    private func extractIOSFormulas(from text: String) -> [String] {
+        var results: [String] = []
+        let pattern = #"\$\$([\s\S]+?)\$\$|(?<!\$)\$([^\$\n]+?)\$(?!\$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return results }
+        let ns = text as NSString
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let r1 = match.range(at: 1)
+            let r2 = match.range(at: 2)
+            let r = (r1.location != NSNotFound) ? r1 : r2
+            if r.location != NSNotFound {
+                let inner = ns.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !inner.isEmpty { results.append(inner) }
+            }
+        }
+        return results
     }
 
     @ViewBuilder

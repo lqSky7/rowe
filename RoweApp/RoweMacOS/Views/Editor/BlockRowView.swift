@@ -339,18 +339,35 @@ struct BlockRowView: View {
                     )
                 }
 
-                if let formulaText = extractInlineFormula(from: block.content) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "function")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                        Text(formulaText)
-                            .font(.system(size: 13, weight: .medium, design: .serif))
-                            .italic()
+                let formulas = extractInlineFormulas(from: block.content)
+                if !formulas.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(formulas.enumerated()), id: \.offset) { _, latex in
+                            HStack(spacing: 8) {
+                                Image(systemName: "function")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(pageInkColor.opacity(0.45))
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    RoweMathView(latex: latex, fontSize: 15.5, inkColor: pageInkColor)
+                                        .padding(.vertical, 2)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(pageInkColor.opacity(0.055))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                            .strokeBorder(pageInkColor.opacity(0.09), lineWidth: 0.75)
+                                    )
+                            )
+                            .onTapGesture {
+                                store.enterInlineEditing(blockId: block.id, utf16Offset: block.content.utf16.count)
+                            }
+                        }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.05)))
+                    .padding(.top, 2)
                     .transition(.roweUnblur)
                 }
             }
@@ -850,13 +867,21 @@ struct BlockRowView: View {
         }
     }
 
-    private func extractInlineFormula(from text: String) -> String? {
-        guard let start = text.range(of: "$$"),
-              let end = text.range(of: "$$", range: start.upperBound..<text.endIndex) else {
-            return nil
+    private func extractInlineFormulas(from text: String) -> [String] {
+        var results: [String] = []
+        let pattern = #"\$\$([\s\S]+?)\$\$|(?<!\$)\$([^\$\n]+?)\$(?!\$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return results }
+        let ns = text as NSString
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let r1 = match.range(at: 1)
+            let r2 = match.range(at: 2)
+            let r = (r1.location != NSNotFound) ? r1 : r2
+            if r.location != NSNotFound {
+                let inner = ns.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !inner.isEmpty { results.append(inner) }
+            }
         }
-        let inner = String(text[start.upperBound..<end.lowerBound]).trimmingCharacters(in: .whitespaces)
-        return inner.isEmpty ? nil : inner
+        return results
     }
 
     private func pillTint(for value: String) -> Color {

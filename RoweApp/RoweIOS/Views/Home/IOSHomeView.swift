@@ -222,12 +222,7 @@ struct IOSHomeView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .refreshable {
-            IOSHaptics.shared.snap()
-            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                store.isQuickOpenPresented = true
-            }
-        }
+        .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: store.settings.reduceAnimations)
         .contentShape(Rectangle())
         .onTapGesture {
             if isSearchFocused {

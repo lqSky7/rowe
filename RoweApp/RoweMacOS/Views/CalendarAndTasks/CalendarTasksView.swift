@@ -162,7 +162,11 @@ struct CalendarTasksView: View {
             .frame(minHeight: isToday ? 160 : 88)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isToday ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.045))
+                    .fill(Color.accentColor.opacity(isToday ? 0.18 : 0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(isToday ? 0.30 : 0.14), lineWidth: 0.75)
+                    )
             )
 
             VStack(alignment: .leading, spacing: 10) {

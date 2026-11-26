@@ -121,12 +121,7 @@ struct IOSCalendarTasksView: View {
             }
             .padding(.bottom, 120)
         }
-        .refreshable {
-            IOSHaptics.shared.snap()
-            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
-                store.isQuickOpenPresented = true
-            }
-        }
+        .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: reduceMotion)
         .scrollDismissesKeyboard(.interactively)
         .toolbar(.hidden, for: .navigationBar)
     }
@@ -199,7 +194,17 @@ struct IOSCalendarTasksView: View {
                         .padding(6)
                 }
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 14)
+            .padding(.vertical, isToday ? 12 : 8)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.accentColor.opacity(isToday ? 0.16 : 0.07))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(isToday ? 0.28 : 0.12), lineWidth: 0.75)
+                    )
+            )
+            .padding(.horizontal, 14)
 
             if pendingTasks.isEmpty && isToday {
                 HStack(spacing: 6) {

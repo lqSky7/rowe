@@ -129,17 +129,7 @@ public enum SeedDataFactory {
             lastViewedAt: now
         )
 
-        let sharedItems: [SharedDocumentItem] = [
-            SharedDocumentItem(
-                title: "Shared Feature Roadmap",
-                preview: "--- ---",
-                sharedByName: "Collaborator",
-                sharedByInitial: "C",
-                sharedByColorHex: "#8B3A1E",
-                dateShared: oneMonthAgo,
-                lastViewed: oneWeekAgo
-            )
-        ]
+        let sharedItems: [SharedDocumentItem] = []
 
         let connections: [ConnectionItem] = [
             ConnectionItem(

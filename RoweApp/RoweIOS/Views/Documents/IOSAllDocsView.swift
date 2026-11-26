@@ -238,12 +238,7 @@ struct IOSAllDocsView: View {
             .padding(.bottom, 110)
         }
         .scrollDismissesKeyboard(.interactively)
-        .refreshable {
-            IOSHaptics.shared.snap()
-            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                store.isQuickOpenPresented = true
-            }
-        }
+        .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: store.settings.reduceAnimations)
         .onTapGesture {
             if isSearchFocused {
                 isSearchFocused = false
