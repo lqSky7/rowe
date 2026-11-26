@@ -18,6 +18,15 @@
       "category": "productivity",
       "versions": [
         {
+          "version": "1.0.4",
+          "buildVersion": "5",
+          "date": "2026-11-26",
+          "localizedDescription": "Version 1.0.4.",
+          "downloadURL": "https://github.com/lqSky7/rowe/releases/download/ios-v1.0.4/Rowe-1.0.4.ipa",
+          "size": 5606516,
+          "minOSVersion": "18.0"
+        },
+        {
           "version": "1.0.3",
           "buildVersion": "4",
           "date": "2026-11-26",
