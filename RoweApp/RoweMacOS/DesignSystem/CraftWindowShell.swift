@@ -16,16 +16,24 @@ struct CraftWindowShell: View {
     @State private var sidebarPage: Int = 1
     @State private var showOnboarding: Bool = false
 
-    private var preferredColorScheme: ColorScheme? {
+    private var isDarkAppearance: Bool {
         switch store.settings.appearanceMode {
-        case .system: nil
-        case .light: .light
-        case .dark: .dark
+        case .light: false
+        case .dark: true
+        case .system: systemColorScheme == .dark
         }
     }
 
-    private var isDarkAppearance: Bool {
-        (preferredColorScheme ?? systemColorScheme) == .dark
+    private func applyAppAppearance(_ mode: AppearanceMode) {
+        let target: NSAppearance? = switch mode {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+        NSApp.appearance = target
+        for window in NSApp.windows {
+            window.appearance = target
+        }
     }
 
     /// Keeps text insertion cursors and controls high-contrast in dark mode when Graphite is selected.
@@ -182,12 +190,17 @@ struct CraftWindowShell: View {
                 }
             }
         }
-        .preferredColorScheme(preferredColorScheme)
         .tint(resolvedAccentColor)
+        .onChange(of: store.settings.appearanceMode) { _, mode in
+            applyAppAppearance(mode)
+        }
         .onChange(of: store.hasLoadedFromDisk) { _, loaded in
-            if loaded && !store.settings.hasCompletedOnboarding {
-                withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                    showOnboarding = true
+            if loaded {
+                applyAppAppearance(store.settings.appearanceMode)
+                if !store.settings.hasCompletedOnboarding {
+                    withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        showOnboarding = true
+                    }
                 }
             }
         }
@@ -197,6 +210,7 @@ struct CraftWindowShell: View {
             }
         }
         .onAppear {
+            applyAppAppearance(store.settings.appearanceMode)
             HapticsManager.shared.isEnabled = store.settings.enableHaptics
             SoundManager.shared.isEnabled = store.settings.enableSound
             RoweAppIconRenderer.applyDockIcon(
