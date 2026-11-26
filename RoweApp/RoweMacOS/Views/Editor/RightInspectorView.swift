@@ -36,12 +36,9 @@ struct RightInspectorView: View {
             LiquidGlassSegmentedControl(
                 items: InspectorTab.allCases,
                 selection: $selectedTab,
-                height: 30
-            ) { tab, isSelected in
-                Text(tab.rawValue)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-            }
+                height: 30,
+                title: \.rawValue
+            )
             .padding(.horizontal, 12)
             .padding(.top, 12)
             .padding(.bottom, 8)
@@ -435,12 +432,9 @@ struct RightInspectorView: View {
         LiquidGlassSegmentedControl(
             items: InfoSubTab.allCases,
             selection: $infoSubTab,
-            height: 32
-        ) { sub, isSelected in
-            Text(sub.rawValue)
-                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .primary : .secondary)
-        }
+            height: 32,
+            title: \.rawValue
+        )
 
         if infoSubTab == .pageInfo {
             inspectorSectionLabel("PROPERTIES")

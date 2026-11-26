@@ -60,6 +60,57 @@ enum IOSTheme {
         case .palatino: return .custom(weight == .bold || weight == .semibold ? "Palatino-Bold" : "Palatino-Roman", size: size)
         }
     }
+
+    static func uiFont(for style: BlockTextStyle, family: FontFamily, isBold: Bool = false, isItalic: Bool = false) -> UIFont {
+        let size: CGFloat = {
+            switch style {
+            case .title: 27
+            case .subtitle: 21
+            case .heading: 18
+            case .strong: 16
+            case .body, .pageRegular, .pageCard: 15.5
+            case .caption: 13
+            }
+        }()
+        let weight: UIFont.Weight = {
+            if isBold { return .bold }
+            switch style {
+            case .title: return .bold
+            case .subtitle, .heading, .strong: return .semibold
+            default: return .regular
+            }
+        }()
+
+        var font: UIFont = {
+            switch family {
+            case .system:
+                return .systemFont(ofSize: size, weight: weight)
+            case .serif:
+                let base = UIFont.systemFont(ofSize: size, weight: weight)
+                if let desc = base.fontDescriptor.withDesign(.serif) { return UIFont(descriptor: desc, size: size) }
+                return base
+            case .mono:
+                return .monospacedSystemFont(ofSize: size, weight: weight)
+            case .rounded:
+                let base = UIFont.systemFont(ofSize: size, weight: weight)
+                if let desc = base.fontDescriptor.withDesign(.rounded) { return UIFont(descriptor: desc, size: size) }
+                return base
+            case .baskerville:
+                return UIFont(name: weight == .bold || weight == .semibold ? "Baskerville-SemiBold" : "Baskerville", size: size) ?? .systemFont(ofSize: size, weight: weight)
+            case .georgia:
+                return UIFont(name: weight == .bold || weight == .semibold ? "Georgia-Bold" : "Georgia", size: size) ?? .systemFont(ofSize: size, weight: weight)
+            case .avenir:
+                return UIFont(name: weight == .bold || weight == .semibold ? "AvenirNext-DemiBold" : "AvenirNext-Regular", size: size) ?? .systemFont(ofSize: size, weight: weight)
+            case .palatino:
+                return UIFont(name: weight == .bold || weight == .semibold ? "Palatino-Bold" : "Palatino-Roman", size: size) ?? .systemFont(ofSize: size, weight: weight)
+            }
+        }()
+
+        if isItalic, let italicDesc = font.fontDescriptor.withSymbolicTraits([font.fontDescriptor.symbolicTraits, .traitItalic]) {
+            font = UIFont(descriptor: italicDesc, size: size)
+        }
+        return font
+    }
 }
 
 struct RowePressScaleStyle: ButtonStyle {

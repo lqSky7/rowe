@@ -14,7 +14,7 @@ struct IOSDocumentEditorView: View {
     @State private var showContentTray = false
     @State private var showTOCSheet = false
     @State private var showColorSheet = false
-    @FocusState private var focusedBlockId: String?
+    @State private var focusedBlockId: String?
     @FocusState private var isTitleFocused: Bool
 
     private var visibleBlocks: [Block] {
@@ -409,29 +409,61 @@ struct IOSDocumentEditorView: View {
                             .buttonStyle(.plain)
                         }
 
-                        TextField(
-                            block.textStyle == .body ? "Write something…" : block.textStyle.displayName,
-                            text: Binding(
-                                get: { block.content },
-                                set: { val in
+                        ZStack(alignment: .topLeading) {
+                            if block.content.isEmpty {
+                                Text(block.textStyle == .body ? "Write something…" : block.textStyle.displayName)
+                                    .font(IOSTheme.font(for: block.textStyle, family: block.fontOverride ?? document.style.fontFamily, isBold: block.isBold))
+                                    .foregroundStyle(ink.opacity(0.35))
+                                    .padding(.top, 3)
+                                    .allowsHitTesting(false)
+                            }
+                            IOSBlockTextView(
+                                block: block,
+                                font: IOSTheme.uiFont(
+                                    for: block.textStyle,
+                                    family: block.fontOverride ?? document.style.fontFamily,
+                                    isBold: block.isBold,
+                                    isItalic: block.isItalic
+                                ),
+                                inkColor: UIColor(ink),
+                                isStrikethrough: block.isStrikethrough || (block.listStyle == .todo && (block.task?.state ?? .pending) != .pending),
+                                isFocused: focusedBlockId == block.id,
+                                isDisabled: isBlockSelectionMode,
+                                caretRequest: store.caretRequest,
+                                onContentChange: { val in
                                     store.activeBlockId = block.id
                                     store.updateBlock(in: document.id, blockId: block.id, coalesceUndo: true) { $0.content = val }
+                                },
+                                onFocusGained: {
+                                    if isBlockSelectionMode {
+                                        toggleSelection(for: block.id)
+                                    } else {
+                                        focusedBlockId = block.id
+                                        store.activeBlockId = block.id
+                                    }
+                                },
+                                onFocusLost: {
+                                    if focusedBlockId == block.id {
+                                        focusedBlockId = nil
+                                    }
+                                },
+                                onReturnSplit: { utf16Offset in
+                                    IOSHaptics.shared.tap()
+                                    withAnimation(IOSTheme.microSpring(reduceMotion: reduceMotion)) {
+                                        store.splitBlock(in: document.id, blockId: block.id, atUTF16Offset: utf16Offset)
+                                    }
+                                    if let nextId = store.activeBlockId {
+                                        focusedBlockId = nextId
+                                    }
+                                },
+                                onBackspaceAtStart: {
+                                    IOSHaptics.shared.tap()
+                                    withAnimation(IOSTheme.microSpring(reduceMotion: reduceMotion)) {
+                                        store.backspaceAtStart(in: document.id, blockId: block.id)
+                                    }
+                                    focusedBlockId = store.activeBlockId
                                 }
-                            ),
-                            axis: .vertical
-                        )
-                        .focused($focusedBlockId, equals: block.id)
-                        .font(IOSTheme.font(for: block.textStyle, family: block.fontOverride ?? document.style.fontFamily, isBold: block.isBold))
-                        .italic(block.isItalic)
-                        .strikethrough(block.isStrikethrough || (block.listStyle == .todo && (block.task?.state ?? .pending) != .pending))
-                        .foregroundStyle(ink)
-                        .disabled(isBlockSelectionMode)
-                        .onTapGesture {
-                            if isBlockSelectionMode {
-                                toggleSelection(for: block.id)
-                            } else {
-                                store.activeBlockId = block.id
-                            }
+                            )
                         }
                     }
                     .padding(.leading, block.decoration == .focus ? 12 : (block.decoration == .block ? 12 : 0))
@@ -1100,5 +1132,147 @@ struct IOSDocumentEditorView: View {
         } else {
             pageSurfaceColor
         }
+    }
+}
+
+// MARK: - UIKit Block TextView (supports Backspace-on-empty-block deletion & Return split)
+
+private struct IOSBlockTextView: UIViewRepresentable {
+    let block: Block
+    let font: UIFont
+    let inkColor: UIColor
+    let isStrikethrough: Bool
+    let isFocused: Bool
+    let isDisabled: Bool
+    let caretRequest: BlockCaretRequest?
+
+    var onContentChange: (String) -> Void
+    var onFocusGained: () -> Void
+    var onFocusLost: () -> Void
+    var onReturnSplit: (_ utf16Offset: Int) -> Void
+    var onBackspaceAtStart: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> RoweIOSUITextView {
+        let tv = RoweIOSUITextView()
+        tv.delegate = context.coordinator
+        tv.coordinator = context.coordinator
+        tv.backgroundColor = .clear
+        tv.isScrollEnabled = false
+        tv.textContainer.lineFragmentPadding = 0
+        tv.textContainerInset = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.setContentHuggingPriority(.required, for: .vertical)
+        context.coordinator.syncFromModel(tv, force: true)
+        return tv
+    }
+
+    func updateUIView(_ uiView: RoweIOSUITextView, context: Context) {
+        context.coordinator.parent = self
+        uiView.isEditable = !isDisabled
+        context.coordinator.syncFromModel(uiView, force: false)
+
+        if let req = caretRequest, req.blockId == block.id, context.coordinator.lastHandledRequestId != req.id {
+            context.coordinator.lastHandledRequestId = req.id
+            DispatchQueue.main.async {
+                if !uiView.isFirstResponder {
+                    uiView.becomeFirstResponder()
+                }
+                let len = (uiView.text as NSString).length
+                let targetOffset = min(max(0, req.utf16Offset ?? len), len)
+                uiView.selectedRange = NSRange(location: targetOffset, length: 0)
+            }
+        } else if isFocused && !uiView.isFirstResponder && !isDisabled {
+            DispatchQueue.main.async {
+                uiView.becomeFirstResponder()
+            }
+        } else if !isFocused && uiView.isFirstResponder {
+            DispatchQueue.main.async {
+                uiView.resignFirstResponder()
+            }
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: RoweIOSUITextView, context: Context) -> CGSize? {
+        let targetWidth = proposal.width ?? uiView.bounds.width
+        guard targetWidth > 0 else { return nil }
+        let fitting = uiView.sizeThatFits(CGSize(width: targetWidth, height: .greatestFiniteMagnitude))
+        return CGSize(width: targetWidth, height: max(26, ceil(fitting.height)))
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: IOSBlockTextView
+        var isApplyingModelSync = false
+        var lastHandledRequestId: UUID?
+        var lastSignature: String = ""
+
+        init(parent: IOSBlockTextView) {
+            self.parent = parent
+        }
+
+        func syncFromModel(_ tv: UITextView, force: Bool) {
+            let sig = "\(parent.block.content.hashValue)|\(parent.font.fontName)|\(parent.font.pointSize)|\(parent.inkColor.description)|\(parent.isStrikethrough)"
+            guard force || sig != lastSignature else { return }
+            lastSignature = sig
+
+            isApplyingModelSync = true
+            defer { isApplyingModelSync = false }
+
+            let saved = tv.selectedRange
+            var attrs: [NSAttributedString.Key: Any] = [
+                .font: parent.font,
+                .foregroundColor: parent.inkColor
+            ]
+            if parent.isStrikethrough {
+                attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+            }
+            tv.attributedText = NSAttributedString(string: parent.block.content, attributes: attrs)
+            tv.typingAttributes = attrs
+
+            let len = (parent.block.content as NSString).length
+            let loc = min(saved.location, len)
+            let selLen = min(saved.length, max(0, len - loc))
+            tv.selectedRange = NSRange(location: loc, length: selLen)
+            tv.invalidateIntrinsicContentSize()
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.onFocusGained()
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.onFocusLost()
+        }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            if text == "\n" {
+                parent.onReturnSplit(range.location)
+                return false
+            }
+            return true
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            guard !isApplyingModelSync else { return }
+            parent.onContentChange(textView.text ?? "")
+            textView.invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+private final class RoweIOSUITextView: UITextView {
+    weak var coordinator: IOSBlockTextView.Coordinator?
+
+    override func deleteBackward() {
+        let sel = selectedRange
+        if sel.location == 0 && sel.length == 0 {
+            coordinator?.parent.onBackspaceAtStart()
+            return
+        }
+        super.deleteBackward()
     }
 }

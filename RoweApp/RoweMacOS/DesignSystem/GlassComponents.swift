@@ -131,87 +131,116 @@ extension View {
     }
 }
 
-/// Native macOS 26 Liquid Glass lens segmented control (`GlassEffectContainer` + `glassEffectID`)
-/// with interactive drag-scrubbing and zero legacy custom capsule/material fallbacks.
-struct LiquidGlassSegmentedControl<Item: Hashable, LabelContent: View>: View {
+/// Native AppKit `NSSegmentedControl` wrapped in `NSViewRepresentable`.
+/// On macOS 26+, AppKit automatically renders the system Liquid Glass selection lens.
+struct LiquidGlassSegmentedControl<Item: Hashable>: NSViewRepresentable {
+    enum SegmentContent {
+        case title(String)
+        case symbol(String, accessibilityLabel: String?)
+    }
+
     let items: [Item]
     @Binding var selection: Item
     let height: CGFloat
-    @ViewBuilder let label: (Item, Bool) -> LabelContent
-
-    @Namespace private var lensNamespace
+    let contentForItem: (Item) -> SegmentContent
 
     init(
         items: [Item],
         selection: Binding<Item>,
         height: CGFloat = 32,
-        @ViewBuilder label: @escaping (Item, Bool) -> LabelContent
+        title: @escaping (Item) -> String
     ) {
         self.items = items
         self._selection = selection
         self.height = height
-        self.label = label
+        self.contentForItem = { .title(title($0)) }
     }
 
-    var body: some View {
-        if #available(macOS 26.0, *) {
-            GeometryReader { geo in
-                let segmentWidth = max(1, (geo.size.width - 6) / CGFloat(max(1, items.count)))
-                GlassEffectContainer(spacing: 0) {
-                    HStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                            let isSelected = item == selection
-                            Button {
-                                guard selection != item else { return }
-                                HapticsManager.shared.tap()
-                                withAnimation(.spring(response: 0.30, dampingFraction: 0.76)) {
-                                    selection = item
-                                }
-                            } label: {
-                                label(item, isSelected)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .contentShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .background {
-                                if isSelected {
-                                    Capsule()
-                                        .fill(Color.clear)
-                                        .glassEffect(.regular.interactive(), in: Capsule())
-                                        .glassEffectID("liquidLens", in: lensNamespace)
-                                }
-                            }
-                        }
-                    }
-                    .padding(3)
-                    .frame(height: height)
-                    .glassEffect(.regular, in: Capsule())
+    init(
+        items: [Item],
+        selection: Binding<Item>,
+        height: CGFloat = 32,
+        systemImage: @escaping (Item) -> String,
+        accessibilityLabel: ((Item) -> String)? = nil
+    ) {
+        self.items = items
+        self._selection = selection
+        self.height = height
+        self.contentForItem = { .symbol(systemImage($0), accessibilityLabel: accessibilityLabel?($0)) }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl()
+        control.trackingMode = .selectOne
+        control.segmentDistribution = .fillEqually
+        control.segmentStyle = .automatic
+        control.controlSize = height >= 34 ? .large : (height >= 26 ? .regular : .small)
+        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        control.target = context.coordinator
+        control.action = #selector(Coordinator.selectionChanged(_:))
+        configureSegments(on: control)
+        return control
+    }
+
+    func updateNSView(_ nsView: NSSegmentedControl, context: Context) {
+        context.coordinator.parent = self
+        let targetSize: NSControl.ControlSize = height >= 34 ? .large : (height >= 26 ? .regular : .small)
+        if nsView.controlSize != targetSize {
+            nsView.controlSize = targetSize
+        }
+        configureSegments(on: nsView)
+    }
+
+    private func configureSegments(on control: NSSegmentedControl) {
+        if control.segmentCount != items.count {
+            control.segmentCount = items.count
+        }
+        for (idx, item) in items.enumerated() {
+            switch contentForItem(item) {
+            case .title(let text):
+                if control.label(forSegment: idx) != text {
+                    control.setLabel(text, forSegment: idx)
                 }
-                .gesture(
-                    DragGesture(minimumDistance: 2)
-                        .onChanged { value in
-                            let rawIdx = Int(((value.location.x - 3) / segmentWidth).rounded(.down))
-                            let clampedIdx = min(max(0, rawIdx), items.count - 1)
-                            let target = items[clampedIdx]
-                            if target != selection {
-                                HapticsManager.shared.tap()
-                                withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.80)) {
-                                    selection = target
-                                }
-                            }
-                        }
-                )
-            }
-            .frame(height: height)
-        } else {
-            Picker("", selection: $selection) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    label(item, item == selection).tag(item)
+                if control.image(forSegment: idx) != nil {
+                    control.setImage(nil, forSegment: idx)
                 }
+            case .symbol(let name, let accLabel):
+                if !(control.label(forSegment: idx)?.isEmpty ?? true) {
+                    control.setLabel("", forSegment: idx)
+                }
+                let img = NSImage(systemSymbolName: name, accessibilityDescription: accLabel)
+                img?.isTemplate = true
+                control.setImage(img, forSegment: idx)
+                control.setImageScaling(.scaleProportionallyDown, forSegment: idx)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(height: height)
+        }
+        let targetIndex = items.firstIndex(of: selection) ?? -1
+        if control.selectedSegment != targetIndex {
+            control.selectedSegment = targetIndex
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: LiquidGlassSegmentedControl
+
+        init(parent: LiquidGlassSegmentedControl) {
+            self.parent = parent
+        }
+
+        @objc func selectionChanged(_ sender: NSSegmentedControl) {
+            let idx = sender.selectedSegment
+            guard idx >= 0, idx < parent.items.count else { return }
+            let chosen = parent.items[idx]
+            if parent.selection != chosen {
+                HapticsManager.shared.tap()
+                parent.selection = chosen
+            }
         }
     }
 }

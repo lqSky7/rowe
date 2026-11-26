@@ -58,13 +58,10 @@ struct DocumentSidebarView: View {
             LiquidGlassSegmentedControl(
                 items: DocumentSidebarTab.allCases,
                 selection: $selectedTab,
-                height: 34
-            ) { tab, isSelected in
-                Image(systemName: tab.icon)
-                    .font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-                    .accessibilityLabel(tab.title)
-            }
+                height: 34,
+                systemImage: \.icon,
+                accessibilityLabel: \.title
+            )
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
 

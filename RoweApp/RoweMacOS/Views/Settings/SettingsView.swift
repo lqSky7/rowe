@@ -434,12 +434,9 @@ struct SettingsView: View {
                             get: { store.settings.searchMaxDepth },
                             set: { depth in store.updateSettings { $0.searchMaxDepth = depth } }
                         ),
-                        height: 30
-                    ) { depth, isSelected in
-                        Text(depth.label)
-                            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? .primary : .secondary)
-                    }
+                        height: 30,
+                        title: \.label
+                    )
                 }
 
                 Divider().opacity(0.25)
@@ -463,12 +460,9 @@ struct SettingsView: View {
                             get: { store.settings.searchCacheLimit },
                             set: { limit in store.updateSettings { $0.searchCacheLimit = limit } }
                         ),
-                        height: 30
-                    ) { limit, isSelected in
-                        Text(limit == 0 ? "Off" : "\(limit)")
-                            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? .primary : .secondary)
-                    }
+                        height: 30,
+                        title: { $0 == 0 ? "Off" : "\($0)" }
+                    )
                 }
 
                 Divider().opacity(0.25)

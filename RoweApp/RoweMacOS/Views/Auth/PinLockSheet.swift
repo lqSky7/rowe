@@ -97,12 +97,9 @@ struct PinLockSheet: View {
                 LiquidGlassSegmentedControl(
                     items: [4, 6],
                     selection: $pinLength,
-                    height: 28
-                ) { len, isSelected in
-                    Text("\(len)-Digit PIN")
-                        .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? .primary : .secondary)
-                }
+                    height: 28,
+                    title: { "\($0)-Digit PIN" }
+                )
                 .frame(width: 190)
                 .onChange(of: pinLength) { _, _ in
                     enteredPin = ""

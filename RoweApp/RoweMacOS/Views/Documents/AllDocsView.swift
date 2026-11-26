@@ -219,12 +219,11 @@ struct AllDocsView: View {
             LiquidGlassSegmentedControl(
                 items: [AllDocsViewStyle.gallery, .grid, .list],
                 selection: viewStyleBinding,
-                height: 30
-            ) { style, isSelected in
-                Image(systemName: style == .gallery ? "rectangle.grid.1x2" : (style == .grid ? "square.grid.2x2" : "line.3.horizontal"))
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-            }
+                height: 30,
+                systemImage: { style in
+                    style == .gallery ? "rectangle.grid.1x2" : (style == .grid ? "square.grid.2x2" : "line.3.horizontal")
+                }
+            )
             .frame(width: 112)
 
             RoweGlassCircleMenu(

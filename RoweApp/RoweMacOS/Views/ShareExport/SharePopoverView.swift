@@ -24,12 +24,9 @@ struct SharePopoverView: View {
             LiquidGlassSegmentedControl(
                 items: SharePopoverTab.allCases,
                 selection: $selectedTab,
-                height: 32
-            ) { tab, isSelected in
-                Text(tab.rawValue)
-                    .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-            }
+                height: 32,
+                title: \.rawValue
+            )
 
             switch selectedTab {
             case .share:

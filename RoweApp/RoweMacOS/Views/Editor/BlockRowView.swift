@@ -719,12 +719,9 @@ struct BlockRowView: View {
                             store.updateBlock(in: document.id, blockId: block.id) { $0.collectionData?.viewMode = mode }
                         }
                     ),
-                    height: 30
-                ) { mode, isSelected in
-                    Text(mode.rawValue)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? .primary : .secondary)
-                }
+                    height: 30,
+                    title: \.rawValue
+                )
                 .frame(width: 240)
 
                 switch collection.viewMode {

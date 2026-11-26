@@ -863,9 +863,23 @@ public final class WorkspaceStore {
             return
         }
 
-        // 5. Merge with previous visible block (or select/delete non-text previous block)
+        // 5. Merge with previous visible block (or delete empty first block / select non-text previous block)
         let visible = visibleBlocks(in: docId)
-        guard let visIdx = visible.firstIndex(where: { $0.id == blockId }), visIdx > 0 else { return }
+        guard let visIdx = visible.firstIndex(where: { $0.id == blockId }) else { return }
+        if visIdx == 0 {
+            if block.content.isEmpty && visible.count > 1 {
+                let next = visible[1]
+                mutateBlocks(in: docId) { blocks in
+                    blocks.removeAll(where: { $0.id == blockId })
+                }
+                if next.isEditableTextBlock {
+                    enterInlineEditing(blockId: next.id, utf16Offset: 0)
+                } else {
+                    selectSingleBlock(next.id)
+                }
+            }
+            return
+        }
         let prev = visible[visIdx - 1]
 
         if prev.isEditableTextBlock {

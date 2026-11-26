@@ -45,12 +45,9 @@ struct AllTasksView: View {
                     LiquidGlassSegmentedControl(
                         items: TaskScopeFilter.allCases,
                         selection: $scope,
-                        height: 30
-                    ) { item, isSelected in
-                        Text(item.rawValue)
-                            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? .primary : .secondary)
-                    }
+                        height: 30,
+                        title: \.rawValue
+                    )
                     .frame(width: 340)
                 }
                 .padding(.leading, store.isLeftSidebarVisible ? 24 : 58)
