@@ -11,6 +11,7 @@ struct IOSDocumentEditorView: View {
     @State private var isBlockSelectionMode = false
     @State private var showStyleSheet = false
     @State private var showInsertSheet = false
+    @State private var showContentTray = false
     @State private var showTOCSheet = false
     @State private var showColorSheet = false
     @FocusState private var focusedBlockId: String?
@@ -65,14 +66,28 @@ struct IOSDocumentEditorView: View {
             }
             .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: store.isDocumentUnlocked(document.id))
 
-            // Bottom Floating Bar (Block Format Sheet when in block selection mode per IMG_5046, else normal pill per IMG_5045)
+            // Bottom Floating Bar (Block Format Sheet when in block selection mode per IMG_5046,
+            // normal pill per IMG_5045 when keyboard is dismissed — never overlap the keyboard toolbar)
             if store.isDocumentUnlocked(document.id) {
-                if isBlockSelectionMode {
+                if showInsertSheet {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                showInsertSheet = false
+                                showContentTray = false
+                            }
+                        }
+                    floatingActionAndInsertBar
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if isBlockSelectionMode {
                     blockSelectionFormatSheet
                         .padding(.horizontal, 12)
                         .padding(.bottom, 10)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
-                } else {
+                } else if focusedBlockId == nil && !isTitleFocused {
                     normalBottomBar
                         .padding(.horizontal, 18)
                         .padding(.bottom, 12)
@@ -81,6 +96,7 @@ struct IOSDocumentEditorView: View {
             }
         }
         .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: isBlockSelectionMode)
+        .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: focusedBlockId != nil || isTitleFocused)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -146,21 +162,19 @@ struct IOSDocumentEditorView: View {
         .sheet(isPresented: $showStyleSheet) {
             IOSStyleGallerySheet(store: store, document: document)
                 .presentationDetents([.medium, .large])
-                .presentationCornerRadius(28)
-        }
-        .sheet(isPresented: $showInsertSheet) {
-            insertBlockSheet
-                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
         .sheet(isPresented: $showTOCSheet) {
             tocSheet
                 .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
         .sheet(isPresented: $showColorSheet) {
             colorPickerSheet
                 .presentationDetents([.height(230)])
+                .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
     }
@@ -331,6 +345,13 @@ struct IOSDocumentEditorView: View {
             .padding(.bottom, 180)
         }
         .scrollDismissesKeyboard(.interactively)
+        .refreshable {
+            IOSHaptics.shared.snap()
+            IOSKeyboard.dismiss()
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                store.isQuickOpenPresented = true
+            }
+        }
     }
 
     // MARK: - Block Row with Swipe-Left to Select + Trailing Checkmark (IMG_5046)
@@ -515,7 +536,7 @@ struct IOSDocumentEditorView: View {
 
     private var normalBottomBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 18) {
+            HStack(spacing: 4) {
                 Button {
                     IOSHaptics.shared.tap()
                     IOSKeyboard.dismiss()
@@ -523,7 +544,10 @@ struct IOSDocumentEditorView: View {
                 } label: {
                     Image(systemName: "paintbrush")
                         .font(.system(size: 17, weight: .medium))
+                        .frame(width: 48, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(RowePressScaleStyle())
 
                 Button {
                     IOSHaptics.shared.tap()
@@ -537,7 +561,10 @@ struct IOSDocumentEditorView: View {
                 } label: {
                     Image(systemName: "textformat")
                         .font(.system(size: 17, weight: .medium))
+                        .frame(width: 48, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(RowePressScaleStyle())
 
                 Button {
                     IOSHaptics.shared.tap()
@@ -546,20 +573,170 @@ struct IOSDocumentEditorView: View {
                 } label: {
                     Image(systemName: "list.bullet.indent")
                         .font(.system(size: 17, weight: .medium))
+                        .frame(width: 48, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(RowePressScaleStyle())
             }
             .foregroundStyle(.primary)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
             .roweIOSGlassCapsule(interactive: true)
 
             Spacer()
 
             IOSGlassCircleButton(systemImage: "plus", size: 50, iconSize: 20) {
                 IOSKeyboard.dismiss()
-                showInsertSheet = true
+                withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                    showInsertSheet = true
+                    showContentTray = true
+                }
             }
         }
+    }
+
+    /// Floating Liquid Glass Action & Insert Bar matching Craft's iOS reference (drag down anywhere to dismiss).
+    private var floatingActionAndInsertBar: some View {
+        VStack(spacing: 10) {
+            if showContentTray {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    insertTile("Heading", icon: "textformat.size.larger") {
+                        _ = store.insertBlock(in: document.id, after: store.activeBlockId, block: Block(documentId: document.id, content: "", textStyle: .heading))
+                    }
+                    insertTile("Task", icon: "checkmark.square") {
+                        _ = store.insertBlock(in: document.id, after: store.activeBlockId, block: Block(documentId: document.id, content: "", listStyle: .todo, task: TaskMetadata()))
+                    }
+                    insertTile("Bullet", icon: "list.bullet") {
+                        _ = store.insertBlock(in: document.id, after: store.activeBlockId, block: Block(documentId: document.id, content: "", listStyle: .bullet))
+                    }
+                    insertTile("Code", icon: "chevron.left.forwardslash.chevron.right") {
+                        _ = store.insertStructuredBlock(in: document.id, after: store.activeBlockId, block: Block(documentId: document.id, kind: .code, content: "", codeLanguage: "swift"), focusTrailingBody: false)
+                    }
+                    insertTile("Separator", icon: "minus") {
+                        store.insertOrUpdateSeparator(in: document.id, after: store.activeBlockId, style: document.style.separatorStyle)
+                    }
+                    insertTile("Page Break", icon: "rectangle.split.1x2") {
+                        store.insertOrUpdateSeparator(in: document.id, after: store.activeBlockId, style: .pageBreak)
+                    }
+                }
+                .padding(12)
+                .roweIOSGlassRoundedRect(radius: 22, interactive: true)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            HStack(spacing: 8) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 18) {
+                        actionDockItem("Style", icon: "textformat", tint: Color(hex: "#C084FC")) {
+                            showInsertSheet = false
+                            showContentTray = false
+                            showStyleSheet = true
+                        }
+                        actionDockItem("+ Content", icon: "arrow.right.circle.fill", tint: Color(hex: "#60A5FA")) {
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                showContentTray.toggle()
+                            }
+                        }
+                        actionDockItem("Remind", icon: "alarm.fill", tint: Color(hex: "#FDE047")) {
+                            _ = store.insertBlock(in: document.id, after: store.activeBlockId, block: Block(documentId: document.id, content: "", listStyle: .todo, task: TaskMetadata(scheduleDate: Date())))
+                            showInsertSheet = false
+                            showContentTray = false
+                        }
+                        actionDockItem("TOC", icon: "list.bullet.indent", tint: Color(hex: "#CBD5E1")) {
+                            showInsertSheet = false
+                            showContentTray = false
+                            showTOCSheet = true
+                        }
+                        actionDockItem("Select", icon: "checkmark.circle", tint: Color(hex: "#FDBA74")) {
+                            showInsertSheet = false
+                            showContentTray = false
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                isBlockSelectionMode = true
+                                if let id = store.activeBlockId ?? visibleBlocks.first?.id {
+                                    store.selectSingleBlock(id)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                }
+                .roweIOSGlassCapsule(interactive: true)
+
+                Button {
+                    IOSHaptics.shared.destructive()
+                    if let targetId = store.activeBlockId ?? visibleBlocks.last?.id {
+                        store.deleteBlock(in: document.id, blockId: targetId)
+                    }
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                        showInsertSheet = false
+                        showContentTray = false
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 19, weight: .medium))
+                        Text("Delete")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(Color(hex: "#F87171"))
+                    .frame(width: 68, height: 60)
+                    .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+                .buttonStyle(RowePressScaleStyle())
+                .roweIOSGlassRoundedRect(radius: 22, interactive: true)
+            }
+        }
+        .iosDragToDismiss {
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                showInsertSheet = false
+                showContentTray = false
+            }
+        }
+    }
+
+    private func actionDockItem(_ title: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button {
+            IOSHaptics.shared.tap()
+            action()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 52, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowePressScaleStyle())
+    }
+
+    private func insertTile(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            IOSHaptics.shared.tap()
+            action()
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                showInsertSheet = false
+                showContentTray = false
+            }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.primary)
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 60)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.08)))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(RowePressScaleStyle())
     }
 
     /// Floating Liquid Glass Block Format Card matching IMG_5046!
@@ -696,6 +873,7 @@ struct IOSDocumentEditorView: View {
         }
         .padding(14)
         .roweIOSGlassRoundedRect(radius: 26, interactive: true)
+        .iosDragToDismiss { exitBlockSelection() }
     }
 
     private func formatStyleBtn(_ title: String, icon: String? = nil, active: Bool, action: @escaping () -> Void) -> some View {

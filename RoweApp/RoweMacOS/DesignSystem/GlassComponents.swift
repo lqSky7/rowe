@@ -131,15 +131,15 @@ extension View {
     }
 }
 
-/// Slideable macOS 26 Liquid Glass segmented control.
+/// Native macOS 26 Liquid Glass lens segmented control (`GlassEffectContainer` + `glassEffectID`)
+/// with interactive drag-scrubbing and zero legacy custom capsule/material fallbacks.
 struct LiquidGlassSegmentedControl<Item: Hashable, LabelContent: View>: View {
     let items: [Item]
     @Binding var selection: Item
     let height: CGFloat
     @ViewBuilder let label: (Item, Bool) -> LabelContent
 
-    @State private var isDragging = false
-    @State private var dragX: CGFloat?
+    @Namespace private var lensNamespace
 
     init(
         items: [Item],
@@ -153,105 +153,65 @@ struct LiquidGlassSegmentedControl<Item: Hashable, LabelContent: View>: View {
         self.label = label
     }
 
-    private var selectedIndex: Int {
-        items.firstIndex(of: selection) ?? 0
-    }
-
     var body: some View {
-        GeometryReader { geo in
-            let count = max(1, items.count)
-            let inset: CGFloat = 3
-            let usableWidth = max(1, geo.size.width - inset * 2)
-            let segmentWidth = usableWidth / CGFloat(count)
-            let thumbOffset: CGFloat = {
-                if let dragX {
-                    let centered = dragX - inset - segmentWidth / 2
-                    return min(max(0, centered), usableWidth - segmentWidth)
-                }
-                return CGFloat(selectedIndex) * segmentWidth
-            }()
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.primary.opacity(0.08))
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75)
-                    )
-
-                slidingThumb
-                    .frame(width: segmentWidth, height: max(20, geo.size.height - inset * 2))
-                    .scaleEffect(isDragging ? 1.06 : 1.0)
-                    .offset(x: inset + thumbOffset)
-                    .animation(
-                        isDragging
-                            ? .interactiveSpring(response: 0.16, dampingFraction: 0.82)
-                            : .spring(response: 0.30, dampingFraction: 0.74),
-                        value: thumbOffset
-                    )
-                    .animation(.spring(response: 0.22, dampingFraction: 0.75), value: isDragging)
-
-                HStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        let isSelected = item == selection
-                        label(item, isSelected)
-                            .frame(width: segmentWidth, height: geo.size.height)
-                            .contentShape(Rectangle())
-                    }
-                }
-                .padding(.horizontal, inset)
-            }
-            .contentShape(Capsule())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if !isDragging { isDragging = true }
-                        dragX = value.location.x
-                        let rawIdx = Int(((value.location.x - inset) / segmentWidth).rounded(.down))
-                        let clampedIdx = min(max(0, rawIdx), items.count - 1)
-                        let target = items[clampedIdx]
-                        if target != selection {
-                            HapticsManager.shared.tap()
-                            selection = target
-                        }
-                    }
-                    .onEnded { value in
-                        let rawIdx = Int(((value.location.x - inset) / segmentWidth).rounded(.down))
-                        let clampedIdx = min(max(0, rawIdx), items.count - 1)
-                        let target = items[clampedIdx]
-                        if target != selection {
-                            HapticsManager.shared.tap()
-                            selection = target
-                        }
-                        isDragging = false
-                        dragX = nil
-                    }
-            )
-        }
-        .frame(height: height)
-    }
-
-    @ViewBuilder
-    private var slidingThumb: some View {
         if #available(macOS 26.0, *) {
-            Capsule()
-                .fill(Color.primary.opacity(isDragging ? 0.10 : 0.06))
-                .glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule()
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.white.opacity(0.6), .white.opacity(0.15)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 0.85
-                        )
+            GeometryReader { geo in
+                let segmentWidth = max(1, (geo.size.width - 6) / CGFloat(max(1, items.count)))
+                GlassEffectContainer(spacing: 0) {
+                    HStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            let isSelected = item == selection
+                            Button {
+                                guard selection != item else { return }
+                                HapticsManager.shared.tap()
+                                withAnimation(.spring(response: 0.30, dampingFraction: 0.76)) {
+                                    selection = item
+                                }
+                            } label: {
+                                label(item, isSelected)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .background {
+                                if isSelected {
+                                    Capsule()
+                                        .fill(Color.clear)
+                                        .glassEffect(.regular.interactive(), in: Capsule())
+                                        .glassEffectID("liquidLens", in: lensNamespace)
+                                }
+                            }
+                        }
+                    }
+                    .padding(3)
+                    .frame(height: height)
+                    .glassEffect(.regular, in: Capsule())
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { value in
+                            let rawIdx = Int(((value.location.x - 3) / segmentWidth).rounded(.down))
+                            let clampedIdx = min(max(0, rawIdx), items.count - 1)
+                            let target = items[clampedIdx]
+                            if target != selection {
+                                HapticsManager.shared.tap()
+                                withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.80)) {
+                                    selection = target
+                                }
+                            }
+                        }
                 )
-                .shadow(color: .black.opacity(0.16), radius: 5, y: 2)
+            }
+            .frame(height: height)
+        } else {
+            Picker("", selection: $selection) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    label(item, item == selection).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(height: height)
         }
     }
 }
@@ -298,11 +258,13 @@ struct GlassCircleButton: View {
 struct GlassPillButton: View {
     let title: String
     let systemImage: String?
+    let tint: Color?
     let action: () -> Void
 
-    init(_ title: String, systemImage: String? = nil, action: @escaping () -> Void) {
+    init(_ title: String, systemImage: String? = nil, tint: Color? = nil, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
+        self.tint = tint
         self.action = action
     }
 
@@ -319,9 +281,13 @@ struct GlassPillButton: View {
                 Text(title)
                     .font(.system(size: 12.5, weight: .medium))
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(tint ?? .primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill((tint ?? .clear).opacity(tint == nil ? 0 : 0.14))
+            )
             .contentShape(Capsule())
         }
         .buttonStyle(RowePressScaleButtonStyle())

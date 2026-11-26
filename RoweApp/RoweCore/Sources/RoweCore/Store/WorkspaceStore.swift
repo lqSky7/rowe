@@ -135,6 +135,8 @@ public final class WorkspaceStore {
     public var authErrorMessage: String?
     public var isAuthBusy: Bool = false
     public var lastSyncStatusMessage: String?
+    public var lastSuccessfulSyncAt: Date?
+    public var hasLoadedFromDisk: Bool = false
     public var isSyncing: Bool = false
     private var dirtyDocumentIds: Set<String> = []
     private var lastSyncServerTimeMs: Int64 = 0
@@ -260,6 +262,7 @@ public final class WorkspaceStore {
         self.searchIndexStats = await searchIndex.currentStats()
         self.stats = await database.computeStats(for: docs)
         recomputeAllTables()
+        self.hasLoadedFromDisk = true
 
         if self.authSession != nil {
             Task {
@@ -1776,7 +1779,9 @@ public final class WorkspaceStore {
             dirtyDocumentIds.subtract(pendingIds)
             firstDirtyAt = dirtyDocumentIds.isEmpty ? nil : Date()
             consecutiveSyncFailures = 0
-            lastSyncStatusMessage = "Synced at \(Date().formatted(date: .omitted, time: .shortened))"
+            let now = Date()
+            lastSuccessfulSyncAt = now
+            lastSyncStatusMessage = "Synced at \(now.formatted(date: .omitted, time: .shortened))"
             await database.scheduleSave(makeSnapshot())
         } catch {
             consecutiveSyncFailures += 1

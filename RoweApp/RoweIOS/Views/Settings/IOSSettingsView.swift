@@ -65,6 +65,10 @@ struct IOSSettingsView: View {
                         settingsRow(store.hasVaultPin ? "Security · PIN Lock On" : "Security · Set Up PIN", icon: "lock")
                     }
                     Divider().opacity(0.2).padding(.leading, 42)
+                    NavigationLink { IOSSearchSettingsView(store: store) } label: {
+                        settingsRow("Global Search & Index", icon: "magnifyingglass")
+                    }
+                    Divider().opacity(0.2).padding(.leading, 42)
                     NavigationLink { IOSAccountSettingsView(store: store) } label: {
                         settingsRow("Account Settings", icon: "person.circle")
                     }
@@ -103,6 +107,12 @@ struct IOSSettingsView: View {
                 .padding(.horizontal, 18)
             }
             .padding(.bottom, 50)
+        }
+        .refreshable {
+            IOSHaptics.shared.snap()
+            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                store.isQuickOpenPresented = true
+            }
         }
         .toolbar(.hidden, for: .navigationBar)
     }
@@ -317,11 +327,71 @@ private struct IOSAppearanceSettingsView: View {
                     .padding(16)
                     .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)))
                 }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Application Icon").font(.system(size: 16, weight: .bold))
+                    Text("Choose between Light and Dark home screen icons.")
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+
+                    HStack(spacing: 16) {
+                        appIconOption(title: "Light", index: 0, isDark: false)
+                        appIconOption(title: "Dark", index: 1, isDark: true)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)))
+                }
             }
             .padding(18)
         }
         .navigationTitle("Appearance & Sound")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func appIconOption(title: String, index: Int, isDark: Bool) -> some View {
+        let isSelected = store.settings.selectedAppIconIndex == index
+        return Button {
+            IOSHaptics.shared.tap()
+            store.updateSettings { $0.selectedAppIconIndex = index }
+            if UIApplication.shared.supportsAlternateIcons {
+                UIApplication.shared.setAlternateIconName(isDark ? "AppIconDark" : nil) { _ in }
+            }
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: isDark
+                                    ? [Color(hex: "#1C1D22"), Color(hex: "#0D0E12")]
+                                    : [Color(hex: "#FCFBF8"), Color(hex: "#E8E3D8")],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(isDark ? Color.white.opacity(0.14) : Color.black.opacity(0.10), lineWidth: 1)
+                        )
+
+                    RoweRibbonMark()
+                        .stroke(style: StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
+                        .foregroundStyle(isDark ? Color.white : Color(hex: "#191B1E"))
+                        .frame(width: 34, height: 26)
+                }
+                .frame(width: 60, height: 60)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2.2)
+                        .padding(-3)
+                )
+
+                Text(title)
+                    .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            }
+        }
+        .buttonStyle(RowePressScaleStyle())
     }
 
     private func phonePreview(mode: AppearanceMode) -> some View {
@@ -434,5 +504,99 @@ private struct IOSAccountSettingsView: View {
             name = store.space.authorName
             email = store.space.email
         }
+    }
+}
+
+/// Global Search & Index customization matching macOS Settings -> Advanced.
+private struct IOSSearchSettingsView: View {
+    @Bindable var store: WorkspaceStore
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Maximum Search Depth")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Controls how far pull-down search deepens when nothing is found in your current view.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                    Picker("Max Depth", selection: Binding(
+                        get: { store.settings.searchMaxDepth },
+                        set: { depth in store.updateSettings { $0.searchMaxDepth = depth } }
+                    )) {
+                        ForEach(SearchMaxDepth.allCases, id: \.self) { depth in
+                            Text(depth.label).tag(depth)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Auto-Deepen When Current View Is Sparse", isOn: Binding(
+                        get: { store.settings.searchAutoDeepen },
+                        set: { val in
+                            IOSHaptics.shared.toggle()
+                            store.updateSettings { $0.searchAutoDeepen = val }
+                        }
+                    ))
+
+                    Divider().opacity(0.25)
+
+                    Text("Query Cache Limit")
+                        .font(.system(size: 15, weight: .semibold))
+                    Picker("Cache Limit", selection: Binding(
+                        get: { store.settings.searchCacheLimit },
+                        set: { limit in store.updateSettings { $0.searchCacheLimit = limit } }
+                    )) {
+                        ForEach([0, 32, 64, 128, 256], id: \.self) { limit in
+                            Text(limit == 0 ? "Off" : "\(limit)").tag(limit)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("\(store.searchIndexStats.indexedRecordCount) items · \(store.searchIndexStats.uniqueTokenCount) tokens · \(store.searchIndexStats.cachedQueryCount) cached")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+
+                    HStack(spacing: 10) {
+                        Button {
+                            IOSHaptics.shared.tap()
+                            store.clearSearchCache()
+                        } label: {
+                            Label("Clear Cache", systemImage: "trash")
+                                .font(.system(size: 14, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.08)))
+                        }
+                        .buttonStyle(RowePressScaleStyle())
+
+                        Button {
+                            IOSHaptics.shared.tap()
+                            store.rebuildSearchIndex()
+                        } label: {
+                            Label("Rebuild Index", systemImage: "arrow.clockwise")
+                                .font(.system(size: 14, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.08)))
+                        }
+                        .buttonStyle(RowePressScaleStyle())
+                    }
+                }
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)))
+            }
+            .padding(18)
+        }
+        .navigationTitle("Global Search & Index")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

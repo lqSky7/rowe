@@ -103,20 +103,67 @@ private final class TaskInputNSTextView: NSTextView {
         super.keyDown(with: event)
     }
 
-    override func paste(_ sender: Any?) {
-        let pb = NSPasteboard.general
-        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
-           let img = images.first {
-            coordinator?.parent.onPasteImage(img)
-            return
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.png, .tiff, .fileURL]
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)) {
+            if pasteboardContainsImage(NSPasteboard.general) {
+                return true
+            }
         }
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingContentsConformToTypes: [UTType.image.identifier]]) as? [URL],
-           let firstURL = urls.first,
-           let img = NSImage(contentsOf: firstURL) {
+        return super.validateUserInterfaceItem(item)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if window?.firstResponder === self,
+           mods == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "v",
+           pasteboardContainsImage(NSPasteboard.general) {
+            paste(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        if let img = extractImageFromPasteboard(NSPasteboard.general) {
             coordinator?.parent.onPasteImage(img)
             return
         }
         super.paste(sender)
+    }
+
+    private func pasteboardContainsImage(_ pb: NSPasteboard) -> Bool {
+        if pb.data(forType: .png) != nil || pb.data(forType: .tiff) != nil {
+            return true
+        }
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingContentsConformToTypes: [UTType.image.identifier]]) as? [URL],
+           !urls.isEmpty {
+            return true
+        }
+        return pb.canReadObject(forClasses: [NSImage.self], options: nil)
+    }
+
+    private func extractImageFromPasteboard(_ pb: NSPasteboard) -> NSImage? {
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingContentsConformToTypes: [UTType.image.identifier]]) as? [URL],
+           let firstURL = urls.first,
+           let img = NSImage(contentsOf: firstURL) {
+            return img
+        }
+        if let pngData = pb.data(forType: .png), let img = NSImage(data: pngData) {
+            return img
+        }
+        if let tiffData = pb.data(forType: .tiff), let img = NSImage(data: tiffData) {
+            return img
+        }
+        if let images = pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+           let img = images.first {
+            return img
+        }
+        return nil
     }
 }
 

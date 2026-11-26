@@ -184,11 +184,16 @@ struct CraftWindowShell: View {
         }
         .preferredColorScheme(preferredColorScheme)
         .tint(resolvedAccentColor)
-        .onChange(of: store.settings.hasCompletedOnboarding) { _, completed in
-            if !completed {
+        .onChange(of: store.hasLoadedFromDisk) { _, loaded in
+            if loaded && !store.settings.hasCompletedOnboarding {
                 withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                     showOnboarding = true
                 }
+            }
+        }
+        .onChange(of: store.settings.hasCompletedOnboarding) { _, completed in
+            withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                showOnboarding = !completed
             }
         }
         .onAppear {
@@ -198,7 +203,7 @@ struct CraftWindowShell: View {
                 variantIndex: store.settings.selectedAppIconIndex,
                 accentHex: store.settings.accentColor.hex
             )
-            if !store.settings.hasCompletedOnboarding {
+            if store.hasLoadedFromDisk && !store.settings.hasCompletedOnboarding {
                 showOnboarding = true
             }
             installGlobalShortcutMonitor()

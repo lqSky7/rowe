@@ -238,6 +238,12 @@ struct IOSAllDocsView: View {
             .padding(.bottom, 110)
         }
         .scrollDismissesKeyboard(.interactively)
+        .refreshable {
+            IOSHaptics.shared.snap()
+            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                store.isQuickOpenPresented = true
+            }
+        }
         .onTapGesture {
             if isSearchFocused {
                 isSearchFocused = false

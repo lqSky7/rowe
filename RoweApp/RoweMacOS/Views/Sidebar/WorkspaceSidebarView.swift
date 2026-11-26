@@ -7,6 +7,8 @@ struct WorkspaceSidebarView: View {
     @State private var isCreatingFolder = false
     @State private var newFolderName = ""
     @State private var isImportingMarkdown = false
+    @State private var isSyncGlowing = false
+    @State private var syncGlowTask: Task<Void, Never>?
 
     private var starredSection: SidebarSectionState {
         store.sidebarSections.first(where: { $0.type == .starred }) ?? SidebarSectionState(type: .starred)
@@ -388,12 +390,43 @@ struct WorkspaceSidebarView: View {
                     }
                 }
             } label: {
-                Image(systemName: store.isSignedIn ? "person.crop.circle.badge.checkmark" : "person.crop.circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(store.isSignedIn ? Color.green : Color.secondary)
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(isSyncGlowing ? 0.35 : 0))
+                        .frame(width: 16, height: 16)
+                        .blur(radius: 3)
+
+                    Circle()
+                        .fill(isSyncGlowing ? Color.green : Color.clear)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    isSyncGlowing ? Color.green : Color.primary.opacity(0.18),
+                                    lineWidth: 1.1
+                                )
+                        )
+                        .frame(width: 8.5, height: 8.5)
+                        .shadow(color: isSyncGlowing ? Color.green.opacity(0.85) : .clear, radius: 4)
+                }
+                .frame(width: 16, height: 16)
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .help(store.isSignedIn ? "Signed in (\(store.authSession?.user.email ?? ""))" : "Sign In / Sync Account")
+            .onChange(of: store.lastSuccessfulSyncAt) { _, newValue in
+                guard newValue != nil else { return }
+                syncGlowTask?.cancel()
+                withAnimation(.easeOut(duration: 0.2)) {
+                    isSyncGlowing = true
+                }
+                syncGlowTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_050_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeInOut(duration: 0.45)) {
+                        isSyncGlowing = false
+                    }
+                }
+            }
 
             Spacer()
 

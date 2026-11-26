@@ -707,7 +707,7 @@ struct SettingsView: View {
                         GlassPillButton("Sync Now", systemImage: "arrow.triangle.2.circlepath") {
                             Task { await store.syncWithBackend() }
                         }
-                        GlassPillButton("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
+                        GlassPillButton("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", tint: .red) {
                             Task { await store.signOut() }
                         }
                     }

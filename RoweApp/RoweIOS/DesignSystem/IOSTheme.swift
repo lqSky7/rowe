@@ -166,3 +166,157 @@ final class IOSHaptics {
         rigid.impactOccurred(intensity: 0.9)
     }
 }
+
+/// Sweeping strikethrough animation matching macOS Rowe.
+struct AnimatedStrikethroughText: View {
+    let text: String
+    let isStruck: Bool
+    let strikeColor: Color
+    let font: Font
+    let lineLimit: Int?
+    let reduceMotion: Bool
+
+    @State private var strikeProgress: Double = 0
+    @State private var sweepTask: Task<Void, Never>?
+
+    init(
+        _ text: String,
+        isStruck: Bool,
+        strikeColor: Color = .secondary,
+        font: Font = .system(size: 16),
+        lineLimit: Int? = 1,
+        reduceMotion: Bool = false
+    ) {
+        self.text = text
+        self.isStruck = isStruck
+        self.strikeColor = strikeColor
+        self.font = font
+        self.lineLimit = lineLimit
+        self.reduceMotion = reduceMotion
+        _strikeProgress = State(initialValue: isStruck ? 1.0 : 0.0)
+    }
+
+    private var renderedAttributed: AttributedString {
+        var attributed = AttributedString(text)
+        let total = text.count
+        guard total > 0, strikeProgress > 0 else { return attributed }
+        let struckChars = min(total, max(0, Int((Double(total) * strikeProgress).rounded())))
+        guard struckChars > 0 else { return attributed }
+        let start = attributed.startIndex
+        let end = attributed.index(start, offsetByCharacters: struckChars)
+        attributed[start..<end].strikethroughStyle = .single
+        attributed[start..<end].strikethroughColor = strikeColor
+        return attributed
+    }
+
+    var body: some View {
+        Text(renderedAttributed)
+            .font(font)
+            .foregroundStyle(isStruck ? .secondary : .primary)
+            .opacity(isStruck ? 0.58 : 1.0)
+            .lineLimit(lineLimit)
+            .animation(
+                reduceMotion ? .easeInOut(duration: 0.1) : .easeOut(duration: 0.22),
+                value: isStruck
+            )
+            .onChange(of: isStruck) { _, newValue in
+                runSweep(to: newValue ? 1.0 : 0.0)
+            }
+            .onDisappear {
+                sweepTask?.cancel()
+            }
+    }
+
+    private func runSweep(to target: Double) {
+        sweepTask?.cancel()
+        if reduceMotion || text.isEmpty {
+            strikeProgress = target
+            return
+        }
+        let start = strikeProgress
+        let steps = 14
+        let stepNs: UInt64 = 15_000_000
+        sweepTask = Task { @MainActor in
+            for step in 1...steps {
+                try? await Task.sleep(nanoseconds: stepNs)
+                guard !Task.isCancelled else { return }
+                let t = Double(step) / Double(steps)
+                let eased = 1.0 - pow(1.0 - t, 3.0)
+                strikeProgress = start + (target - start) * eased
+            }
+            strikeProgress = target
+        }
+    }
+}
+
+/// Re-enables UIKit's edge-swipe-back gesture on `NavigationStack` even when `.toolbar(.hidden, for: .navigationBar)` is used.
+struct IOSSwipeBackEnabler: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> SwipeBackController {
+        SwipeBackController()
+    }
+
+    func updateUIViewController(_ uiViewController: SwipeBackController, context: Context) {
+        uiViewController.enableInteractivePop()
+    }
+
+    final class SwipeBackController: UIViewController {
+        override func didMove(toParent parent: UIViewController?) {
+            super.didMove(toParent: parent)
+            enableInteractivePop()
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            enableInteractivePop()
+        }
+
+        func enableInteractivePop() {
+            DispatchQueue.main.async { [weak self] in
+                guard let nav = self?.navigationController else { return }
+                nav.interactivePopGestureRecognizer?.isEnabled = true
+                nav.interactivePopGestureRecognizer?.delegate = nil
+            }
+        }
+    }
+}
+
+/// Makes any custom floating iOS sheet/card dismissable by dragging down anywhere on it.
+struct IOSDragToDismissModifier: ViewModifier {
+    var onDismiss: () -> Void
+    @State private var dragOffsetY: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: max(0, dragOffsetY))
+            .opacity(dragOffsetY > 0 ? max(0.35, 1.0 - Double(dragOffsetY) / 260.0) : 1.0)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 14)
+                    .onChanged { value in
+                        guard value.translation.height > 0,
+                              abs(value.translation.height) > abs(value.translation.width) * 1.1 else { return }
+                        dragOffsetY = value.translation.height
+                    }
+                    .onEnded { value in
+                        if value.translation.height > 75 || value.predictedEndTranslation.height > 145 {
+                            IOSHaptics.shared.tap()
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                                dragOffsetY = 260
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+                                onDismiss()
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+                                dragOffsetY = 0
+                            }
+                        }
+                    }
+            )
+    }
+}
+
+extension View {
+    func iosDragToDismiss(onDismiss: @escaping () -> Void) -> some View {
+        modifier(IOSDragToDismissModifier(onDismiss: onDismiss))
+    }
+}

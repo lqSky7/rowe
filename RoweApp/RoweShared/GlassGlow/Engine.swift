@@ -19,14 +19,22 @@ final class GlowPipelines: @unchecked Sendable {
 
     init(device: MTLDevice) throws {
         self.device = device
-        guard let queue = device.makeCommandQueue(),
-              let url = Bundle.main.url(forResource: "GlassGlow", withExtension: "metal", subdirectory: "Shaders")
-                ?? Bundle.main.url(forResource: "GlassGlow", withExtension: "metal") else {
+        guard let queue = device.makeCommandQueue() else {
             throw GlassGlowError.metalUnavailable
         }
         self.queue = queue
-        // Compiled at run time: SwiftPM only compiles .metal files in Xcode builds.
-        let library = try device.makeLibrary(source: String(contentsOf: url, encoding: .utf8), options: nil)
+        // Xcode builds (including iOS) compile .metal files into default.metallib;
+        // SwiftPM / direct swiftc builds bundle GlassGlow.metal for runtime compilation.
+        let library: MTLLibrary
+        if let defaultLib = device.makeDefaultLibrary(),
+           defaultLib.makeFunction(name: "gg_reset") != nil {
+            library = defaultLib
+        } else if let url = Bundle.main.url(forResource: "GlassGlow", withExtension: "metal", subdirectory: "Shaders")
+            ?? Bundle.main.url(forResource: "GlassGlow", withExtension: "metal") {
+            library = try device.makeLibrary(source: String(contentsOf: url, encoding: .utf8), options: nil)
+        } else {
+            throw GlassGlowError.metalUnavailable
+        }
         func pipeline(_ name: String) throws -> MTLComputePipelineState {
             guard let function = library.makeFunction(name: name) else { throw GlassGlowError.metalUnavailable }
             return try device.makeComputePipelineState(function: function)

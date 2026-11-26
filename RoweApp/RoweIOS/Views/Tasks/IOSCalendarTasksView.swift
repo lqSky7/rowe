@@ -6,10 +6,12 @@ enum IOSTaskViewMode {
     case allTasks
 }
 
-/// iOS Calendar & Tasks view matching IMG_5040 + IMG_5055:
+/// iOS Calendar & Tasks view matching the macOS Calendar experience:
 /// - Date-grouped timeline (`Nov 26 / Today · Thursday` in accent color, Tomorrow, Upcoming)
-/// - Single-tap complete with sweeping strikethrough & haptics, double-tap red cross-out without jump
-/// - NumericText transitions for live remaining counts.
+/// - 2-second linger before completed/crossed-out tasks disappear into Completed
+/// - Animated sweeping strikethrough (`AnimatedStrikethroughText`)
+/// - Single-tap complete, double-tap (or swipe) red cross-out with haptics
+/// - Pull down / tap pill to reveal or hide previous days.
 struct IOSCalendarTasksView: View {
     @Bindable var store: WorkspaceStore
     let mode: IOSTaskViewMode
@@ -17,21 +19,30 @@ struct IOSCalendarTasksView: View {
     var onOpenQuickAdd: () -> Void
 
     @State private var showCompleted: Bool = false
+    @State private var showPreviousDays: Bool = false
+    @State private var expandedCompletedDays: Set<Date> = []
+    @State private var lingeringTaskIds: Set<String> = []
+    @State private var lingerTimers: [String: Task<Void, Never>] = [:]
+
+    private var reduceMotion: Bool {
+        store.settings.reduceAnimations
+    }
 
     private var allTasks: [ResolvedTaskItem] {
         store.allTasks()
     }
 
-    private var upcomingDays: [Date] {
+    private var visibleDays: [Date] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: today) }
+        let startOffset = showPreviousDays ? -5 : 0
+        return (startOffset...6).compactMap { cal.date(byAdding: .day, value: $0, to: today) }
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                // Top bar matching IMG_5040
+            VStack(alignment: .leading, spacing: 20) {
+                // Top bar
                 HStack {
                     Button {
                         IOSHaptics.shared.tap()
@@ -46,6 +57,7 @@ struct IOSCalendarTasksView: View {
                     HStack(spacing: 14) {
                         Menu {
                             Toggle("Show Completed", isOn: $showCompleted)
+                            Toggle("Show Previous Days", isOn: $showPreviousDays)
                             Button("Add Task", systemImage: "plus") { onOpenQuickAdd() }
                         } label: {
                             Image(systemName: "ellipsis")
@@ -77,14 +89,43 @@ struct IOSCalendarTasksView: View {
                 .padding(.top, 8)
 
                 if mode == .calendar {
-                    ForEach(upcomingDays, id: \.self) { day in
+                    // Previous days toggle pill (also toggled by pull-to-refresh)
+                    Button {
+                        IOSHaptics.shared.toggle()
+                        withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                            showPreviousDays.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 12.5, weight: .semibold))
+                            Text(showPreviousDays ? "Hide Previous Days" : "Show Previous Days")
+                                .font(.system(size: 13, weight: .medium))
+                                .contentTransition(.numericText())
+                        }
+                        .foregroundStyle(showPreviousDays ? Color.accentColor : .secondary)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 7)
+                        .roweIOSGlassCapsule(interactive: true)
+                    }
+                    .buttonStyle(RowePressScaleStyle())
+                    .padding(.horizontal, 18)
+
+                    ForEach(visibleDays, id: \.self) { day in
                         daySection(for: day)
+                            .transition(.roweUnblur)
                     }
                 } else {
                     allTasksBody
                 }
             }
             .padding(.bottom, 120)
+        }
+        .refreshable {
+            IOSHaptics.shared.snap()
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                store.isQuickOpenPresented = true
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .toolbar(.hidden, for: .navigationBar)
@@ -94,14 +135,22 @@ struct IOSCalendarTasksView: View {
         let cal = Calendar.current
         let isToday = cal.isDateInToday(day)
         let isTomorrow = cal.isDateInTomorrow(day)
+        let isYesterday = cal.isDateInYesterday(day)
+
         let dayTasks = allTasks.filter { item in
-            let state = item.block.task?.state ?? .pending
-            if !showCompleted && state != .pending { return false }
             if let sched = item.block.task?.scheduleDate {
                 return cal.isDate(sched, inSameDayAs: day)
             }
             return isToday
         }
+
+        let pendingTasks = dayTasks.filter {
+            ($0.block.task?.state ?? .pending) == .pending || lingeringTaskIds.contains($0.block.id)
+        }
+        let finishedTasks = dayTasks.filter {
+            ($0.block.task?.state ?? .pending) != .pending && !lingeringTaskIds.contains($0.block.id)
+        }
+        let showDayCompleted = showCompleted || expandedCompletedDays.contains(day)
 
         let monthDay = day.formatted(.dateTime.month(.abbreviated).day())
         let weekday = day.formatted(.dateTime.weekday(.wide))
@@ -128,6 +177,10 @@ struct IOSCalendarTasksView: View {
                                 Text("Tomorrow")
                                     .font(.system(size: 17, weight: .medium))
                                     .foregroundStyle(.secondary)
+                            } else if isYesterday {
+                                Text("Yesterday")
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(.secondary)
                             }
                             Text("· \(weekday)")
                                 .font(.system(size: 17, weight: .regular))
@@ -140,23 +193,67 @@ struct IOSCalendarTasksView: View {
                     IOSHaptics.shared.tap()
                     onOpenQuickAdd()
                 } label: {
-                    Image(systemName: "ellipsis")
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isToday ? Color.accentColor : .secondary)
                         .padding(6)
                 }
             }
             .padding(.horizontal, 18)
 
-            if dayTasks.isEmpty && isToday {
-                Text("All clear for today")
-                    .font(.system(size: 14.5))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 6)
+            if pendingTasks.isEmpty && isToday {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.accentColor)
+                    Text("All clear for today")
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 6)
             } else {
                 VStack(spacing: 2) {
-                    ForEach(dayTasks) { item in
-                        IOSTaskRow(store: store, item: item)
+                    ForEach(pendingTasks) { item in
+                        IOSTaskRow(store: store, item: item) { newState in
+                            handleTaskStateChange(item: item, newState: newState)
+                        }
+                        .transition(.roweUnblur)
+                    }
+                }
+                .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pendingTasks.map(\.id))
+            }
+
+            if !finishedTasks.isEmpty {
+                Button {
+                    IOSHaptics.shared.tap()
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                        if expandedCompletedDays.contains(day) {
+                            expandedCompletedDays.remove(day)
+                        } else {
+                            expandedCompletedDays.insert(day)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "tray.full")
+                            .font(.system(size: 12))
+                        Text(showDayCompleted ? "Hide Completed (\(finishedTasks.count))" : "View Completed (\(finishedTasks.count))")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 2)
+                }
+
+                if showDayCompleted {
+                    VStack(spacing: 2) {
+                        ForEach(finishedTasks) { item in
+                            IOSTaskRow(store: store, item: item) { newState in
+                                handleTaskStateChange(item: item, newState: newState)
+                            }
+                            .transition(.roweUnblur)
+                        }
                     }
                 }
             }
@@ -165,8 +262,12 @@ struct IOSCalendarTasksView: View {
 
     @ViewBuilder
     private var allTasksBody: some View {
-        let pending = allTasks.filter { ($0.block.task?.state ?? .pending) == .pending }
-        let completed = allTasks.filter { ($0.block.task?.state ?? .pending) != .pending }
+        let pending = allTasks.filter {
+            ($0.block.task?.state ?? .pending) == .pending || lingeringTaskIds.contains($0.block.id)
+        }
+        let completed = allTasks.filter {
+            ($0.block.task?.state ?? .pending) != .pending && !lingeringTaskIds.contains($0.block.id)
+        }
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
@@ -189,14 +290,20 @@ struct IOSCalendarTasksView: View {
                 .padding(.top, 40)
             } else {
                 ForEach(pending) { item in
-                    IOSTaskRow(store: store, item: item)
+                    IOSTaskRow(store: store, item: item) { newState in
+                        handleTaskStateChange(item: item, newState: newState)
+                    }
+                    .transition(.roweUnblur)
                 }
+                .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pending.map(\.id))
             }
 
             if !completed.isEmpty {
                 DisclosureGroup("Completed (\(completed.count))", isExpanded: $showCompleted) {
                     ForEach(completed) { item in
-                        IOSTaskRow(store: store, item: item)
+                        IOSTaskRow(store: store, item: item) { newState in
+                            handleTaskStateChange(item: item, newState: newState)
+                        }
                     }
                 }
                 .font(.system(size: 14, weight: .semibold))
@@ -206,12 +313,41 @@ struct IOSCalendarTasksView: View {
             }
         }
     }
+
+    private func handleTaskStateChange(item: ResolvedTaskItem, newState: TaskCompletionState) {
+        let id = item.block.id
+        lingerTimers[id]?.cancel()
+        lingerTimers.removeValue(forKey: id)
+
+        if newState == .pending {
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                lingeringTaskIds.remove(id)
+                store.setTaskState(docId: item.documentId, blockId: id, state: newState)
+            }
+            return
+        }
+
+        // Linger for 2 seconds so the sweeping strikethrough & red cross-out play cleanly before moving to Completed
+        lingeringTaskIds.insert(id)
+        store.setTaskState(docId: item.documentId, blockId: id, state: newState)
+
+        lingerTimers[id] = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            _ = withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                lingeringTaskIds.remove(id)
+            }
+            lingerTimers.removeValue(forKey: id)
+        }
+    }
 }
 
 struct IOSTaskRow: View {
     @Bindable var store: WorkspaceStore
     let item: ResolvedTaskItem
+    var onStateChange: ((TaskCompletionState) -> Void)? = nil
     @State private var redFlash = false
+    @State private var popScale: CGFloat = 1.0
 
     private var state: TaskCompletionState {
         item.block.task?.state ?? .pending
@@ -219,13 +355,13 @@ struct IOSTaskRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Single tap = complete, Double tap = red cross-out (zero layout jump)
+            // Single tap = complete/uncomplete, Double tap = cross out (red flash + xmark)
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(
                         redFlash || state == .canceled
                             ? Color.red
-                            : (state == .completed ? Color.primary.opacity(0.65) : Color.clear)
+                            : (state == .completed ? Color.accentColor : Color.clear)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -236,37 +372,39 @@ struct IOSTaskRow: View {
                                 lineWidth: 1.5
                             )
                     )
-                if state == .completed {
+                if state == .completed && !redFlash {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .foregroundStyle(.white)
+                        .transition(.scale(scale: 0.4).combined(with: .opacity))
                 } else if state == .canceled || redFlash {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
+                        .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
             }
-            .frame(width: 21, height: 21)
-            .contentShape(Rectangle().inset(by: -8))
+            .scaleEffect(popScale)
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle().inset(by: -10))
             .onTapGesture(count: 2) {
-                IOSHaptics.shared.errorBuzz()
-                withAnimation(.easeInOut(duration: 0.16)) { redFlash = true }
-                store.setTaskState(docId: item.documentId, blockId: item.block.id, state: state == .canceled ? .pending : .canceled)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { redFlash = false }
+                triggerCrossOut()
             }
             .onTapGesture(count: 1) {
-                let next: TaskCompletionState = state == .pending ? .completed : .pending
-                if next == .completed { IOSHaptics.shared.taskComplete() } else { IOSHaptics.shared.tap() }
-                withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                    store.setTaskState(docId: item.documentId, blockId: item.block.id, state: next)
-                }
+                triggerCompleteToggle()
             }
 
-            Text(item.block.content.isEmpty ? "Untitled Task" : item.block.content)
-                .font(.system(size: 16))
-                .strikethrough(state != .pending, color: state == .canceled ? .red.opacity(0.8) : .secondary)
-                .foregroundStyle(state != .pending ? .secondary : .primary)
-                .lineLimit(1)
+            AnimatedStrikethroughText(
+                item.block.content.isEmpty ? "Untitled Task" : item.block.content,
+                isStruck: state != .pending,
+                strikeColor: state == .canceled ? Color.red.opacity(0.85) : .secondary,
+                font: .system(size: 16),
+                lineLimit: 2,
+                reduceMotion: store.settings.reduceAnimations
+            )
+            .onTapGesture(count: 2) {
+                triggerCrossOut()
+            }
 
             Spacer(minLength: 6)
 
@@ -289,17 +427,80 @@ struct IOSTaskRow: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 9)
+        .contextMenu {
+            Button(state == .completed ? "Mark Incomplete" : "Complete Task", systemImage: "checkmark.circle") {
+                triggerCompleteToggle()
+            }
+            Button(state == .canceled ? "Uncross Task" : "Cross Out Task", systemImage: "xmark.circle", role: .destructive) {
+                triggerCrossOut()
+            }
+        }
+    }
+
+    private func triggerPop() {
+        withAnimation(.spring(response: 0.16, dampingFraction: 0.55)) {
+            popScale = 1.18
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.72)) {
+                popScale = 1.0
+            }
+        }
+    }
+
+    private func triggerCompleteToggle() {
+        triggerPop()
+        let next: TaskCompletionState = state == .pending ? .completed : .pending
+        if next == .completed { IOSHaptics.shared.taskComplete() } else { IOSHaptics.shared.tap() }
+        applyState(next)
+    }
+
+    private func triggerCrossOut() {
+        triggerPop()
+        IOSHaptics.shared.errorBuzz()
+        withAnimation(.easeOut(duration: 0.1)) { redFlash = true }
+        let next: TaskCompletionState = state == .canceled ? .pending : .canceled
+        applyState(next)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            withAnimation(.easeInOut(duration: 0.2)) { redFlash = false }
+        }
+    }
+
+    private func applyState(_ next: TaskCompletionState) {
+        if let onStateChange {
+            onStateChange(next)
+        } else {
+            store.setTaskState(docId: item.documentId, blockId: item.block.id, state: next)
+        }
     }
 }
 
-/// Floating Quick Add Card above the keyboard matching IMG_5055.
+/// Floating Quick Add Card above the keyboard with Undo/Redo, app accent color, tap-safe backdrop, and drag-to-dismiss.
 struct IOSQuickAddTaskCard: View {
+    @Environment(\.colorScheme) private var systemColorScheme
     @Bindable var store: WorkspaceStore
     var onClose: () -> Void
 
     @State private var text: String = ""
     @State private var scheduleDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var undoStack: [String] = []
+    @State private var redoStack: [String] = []
+    @State private var isApplyingHistory = false
     @FocusState private var isFocused: Bool
+
+    private var resolvedAccent: Color {
+        let isDark: Bool = switch store.settings.appearanceMode {
+        case .system: systemColorScheme == .dark
+        case .light: false
+        case .dark: true
+        }
+        if store.settings.accentColor == .graphite && isDark {
+            return Color(hex: "#F3F4F6")
+        }
+        return Color(hex: store.settings.accentColor.hex)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -316,6 +517,7 @@ struct IOSQuickAddTaskCard: View {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
                             .font(.system(size: 14))
+                            .foregroundStyle(resolvedAccent)
                         Text(Calendar.current.isDateInToday(scheduleDate) ? "Today" : scheduleDate.formatted(.dateTime.month(.abbreviated).day()))
                             .font(.system(size: 15, weight: .medium))
                             .contentTransition(.numericText())
@@ -323,6 +525,8 @@ struct IOSQuickAddTaskCard: View {
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
 
                 Spacer()
@@ -336,7 +540,9 @@ struct IOSQuickAddTaskCard: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.primary.opacity(0.10)))
+                        .contentShape(Circle())
                 }
+                .buttonStyle(RowePressScaleStyle())
             }
 
             TextField("Add to Daily Note or Task", text: $text, axis: .vertical)
@@ -345,29 +551,75 @@ struct IOSQuickAddTaskCard: View {
                 .lineLimit(1...4)
                 .submitLabel(.done)
                 .onSubmit { saveAndClose() }
+                .onChange(of: text) { oldValue, newValue in
+                    guard !isApplyingHistory, oldValue != newValue else { return }
+                    undoStack.append(oldValue)
+                    if undoStack.count > 40 { undoStack.removeFirst() }
+                    redoStack.removeAll()
+                }
 
-            HStack(spacing: 14) {
-                Image(systemName: "doc.plaintext")
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Button {
+                    guard let prev = undoStack.popLast() else { return }
+                    IOSHaptics.shared.tap()
+                    isApplyingHistory = true
+                    redoStack.append(text)
+                    text = prev
+                    DispatchQueue.main.async { isApplyingHistory = false }
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(undoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Circle())
+                }
+                .disabled(undoStack.isEmpty)
+                .buttonStyle(RowePressScaleStyle())
+
+                Button {
+                    guard let next = redoStack.popLast() else { return }
+                    IOSHaptics.shared.tap()
+                    isApplyingHistory = true
+                    undoStack.append(text)
+                    text = next
+                    DispatchQueue.main.async { isApplyingHistory = false }
+                } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(redoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Circle())
+                }
+                .disabled(redoStack.isEmpty)
+                .buttonStyle(RowePressScaleStyle())
+
                 Image(systemName: "checkmark.square")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(resolvedAccent)
+
                 Spacer()
+
                 Button {
                     saveAndClose()
                 } label: {
                     Text("Add")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(store.settings.accentColor == .graphite ? Color(uiColor: .systemBackground) : .white)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 9)
-                        .background(Capsule().fill(Color.accentColor))
+                        .background(Capsule().fill(resolvedAccent))
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(RowePressScaleStyle())
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(18)
+        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onTapGesture {
+            isFocused = true
+        }
         .roweIOSGlassRoundedRect(radius: 24, interactive: true)
+        .iosDragToDismiss(onDismiss: onClose)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { isFocused = true }
         }

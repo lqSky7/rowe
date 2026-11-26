@@ -50,7 +50,7 @@ struct CalendarTasksView: View {
                                 .font(.system(size: 12.5, weight: .medium))
                                 .contentTransition(.numericText())
                         }
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(showPreviousDays ? Color.accentColor : .secondary)
                         .frame(width: 158)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -118,13 +118,14 @@ struct CalendarTasksView: View {
             HStack(spacing: 5) {
                 Image(systemName: isOn.wrappedValue ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12))
+                    .foregroundStyle(isOn.wrappedValue ? Color.accentColor : .secondary)
                 Text(title)
                     .font(.system(size: 12.5, weight: isOn.wrappedValue ? .medium : .regular))
             }
             .foregroundStyle(isOn.wrappedValue ? .primary : .secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(Capsule().fill(isOn.wrappedValue ? Color.primary.opacity(0.09) : Color.clear))
+            .background(Capsule().fill(isOn.wrappedValue ? Color.accentColor.opacity(0.14) : Color.clear))
         }
         .buttonStyle(RowePressScaleButtonStyle())
     }
@@ -145,10 +146,11 @@ struct CalendarTasksView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(dayNumberTitle(day))
                     .font(.system(size: 13.5, weight: .bold))
+                    .foregroundStyle(isToday ? Color.accentColor : .primary)
                 if let relative = relativeDayLabel(day) {
                     Text(relative)
                         .font(.system(size: 13, weight: isToday ? .semibold : .medium))
-                        .foregroundStyle(isToday ? .primary : .secondary)
+                        .foregroundStyle(isToday ? Color.accentColor : .secondary)
                 }
                 Text(weekdayName(day))
                     .font(.system(size: 12.5))
@@ -160,7 +162,7 @@ struct CalendarTasksView: View {
             .frame(minHeight: isToday ? 160 : 88)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(0.045))
+                    .fill(isToday ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.045))
             )
 
             VStack(alignment: .leading, spacing: 10) {
@@ -207,7 +209,7 @@ struct CalendarTasksView: View {
                     }
 
                     if isToday {
-                        GlassPillButton("Add Task", systemImage: "checkmark.square") {
+                        GlassPillButton("Add Task", systemImage: "checkmark.square", tint: .accentColor) {
                             withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
                                 store.activeTaskEditor = .create(defaultDate: day)
                             }
@@ -227,7 +229,12 @@ struct CalendarTasksView: View {
                 .fill(isToday ? Color(nsColor: .controlBackgroundColor) : Color.clear)
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(isDayDropTarget ? Color.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.5)
+                        .strokeBorder(
+                            isDayDropTarget
+                                ? Color.accentColor.opacity(0.75)
+                                : (isToday ? Color.accentColor.opacity(0.24) : Color.clear),
+                            lineWidth: isDayDropTarget ? 1.5 : 1.0
+                        )
                 )
                 .shadow(color: isToday ? .black.opacity(0.07) : .clear, radius: 18, y: 6)
         )
@@ -268,7 +275,7 @@ struct CalendarTasksView: View {
             HStack(spacing: 7) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.accentColor)
                 Text("All clear for today")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)

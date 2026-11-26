@@ -66,7 +66,7 @@ struct AllTasksView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 16))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.accentColor)
                         Text("Add Task… (⌘J)")
                             .font(.system(size: 14))
                             .foregroundStyle(.secondary)

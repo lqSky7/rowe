@@ -222,6 +222,12 @@ struct IOSHomeView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .refreshable {
+            IOSHaptics.shared.snap()
+            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                store.isQuickOpenPresented = true
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             if isSearchFocused {
