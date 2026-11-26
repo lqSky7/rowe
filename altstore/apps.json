@@ -26,7 +26,12 @@
           "size": 3740621,
           "minOSVersion": "18.0"
         }
-      ]
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      }
     }
-  ]
+  ],
+  "news": []
 }
