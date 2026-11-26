@@ -16,7 +16,17 @@
       "iconURL": "https://raw.githubusercontent.com/lqSky7/rowe/main/altstore/icon.png",
       "tintColor": "#1E293B",
       "category": "productivity",
-      "versions": []
+      "versions": [
+        {
+          "version": "1.0.0",
+          "buildVersion": "1",
+          "date": "2026-11-26",
+          "localizedDescription": "Version 1.0.0.",
+          "downloadURL": "https://github.com/lqSky7/rowe/releases/download/ios-v1.0.0/Rowe-1.0.0.ipa",
+          "size": 3740621,
+          "minOSVersion": "18.0"
+        }
+      ]
     }
   ]
 }
