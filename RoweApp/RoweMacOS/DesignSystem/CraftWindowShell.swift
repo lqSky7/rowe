@@ -222,6 +222,9 @@ struct CraftWindowShell: View {
             }
             installGlobalShortcutMonitor()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            store.handleAppBecameActive()
+        }
         .onDisappear {
             if let m = globalKeyMonitor {
                 NSEvent.removeMonitor(m)

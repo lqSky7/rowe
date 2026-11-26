@@ -1,5 +1,6 @@
 name: RoweIOS
 options:
+  postGenCommand: "python3 scripts/fix-local-package-backlinks.py"
   bundleIdPrefix: com.rowe
   deploymentTarget:
     iOS: "18.0"
@@ -16,6 +17,7 @@ targets:
       - path: DesignSystem
       - path: Views
       - path: ../RoweShared
+      - path: Resources/Shaders/GlassGlow.metal
       - path: Resources/Assets.xcassets
       - path: Resources/Wallpapers
         buildPhase: resources

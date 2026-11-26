@@ -20,12 +20,14 @@ struct IOSStyleGallerySheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: WorkspaceStore
     let document: RoweDocument
+    @Binding var preferredHeight: CGFloat
 
     @State private var page: IOSStyleSheetPage = .hub
     @State private var styleSearch: String = ""
     @State private var backdropEffectFaded: Bool = false
     @State private var customColor: Color = .accentColor
     @State private var pickedCoverItem: PhotosPickerItem?
+    @State private var showBackdropPhotoPicker: Bool = false
 
     private var reduceMotion: Bool { store.settings.reduceAnimations }
 
@@ -39,36 +41,57 @@ struct IOSStyleGallerySheet: View {
         "#1C1E26", "#151C28", "#201C1B", "#18181B", "#12142A"
     ]
 
+    private func detentHeight(for target: IOSStyleSheetPage) -> CGFloat {
+        switch target {
+        case .hub: 396
+        case .textColor: 224
+        case .paper: 224
+        case .font: 268
+        case .separators: 368
+        case .backdrop: 376
+        case .styles: 540
+        }
+    }
+
+    private func navigateTo(_ target: IOSStyleSheetPage) {
+        withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+            page = target
+            preferredHeight = detentHeight(for: target)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            Group {
+            ZStack {
                 switch page {
                 case .hub:
                     hubGridView
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .transition(.roweUnblur)
                 case .backdrop:
                     backdropEditorView
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .transition(.roweUnblur)
                 case .styles:
                     styleGalleryView
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .transition(.roweUnblur)
                 case .font:
                     fontPickerView
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .transition(.roweUnblur)
                 case .textColor:
                     textColorPickerView
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .transition(.roweUnblur)
                 case .paper:
                     paperPickerView
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .transition(.roweUnblur)
                 case .separators:
                     separatorsPickerView
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        .transition(.roweUnblur)
                 }
             }
             .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: page)
         }
-        .padding(.top, 8)
+        .padding(.top, 14)
+        .photosPicker(isPresented: $showBackdropPhotoPicker, selection: $pickedCoverItem, matching: .images)
+        .onAppear { preferredHeight = detentHeight(for: page) }
         .onChange(of: pickedCoverItem) { _, item in
             Task {
                 if let data = try? await item?.loadTransferable(type: Data.self) {
@@ -89,7 +112,7 @@ struct IOSStyleGallerySheet: View {
             HStack(spacing: 12) {
                 Button {
                     IOSHaptics.shared.tap()
-                    page = .textColor
+                    navigateTo(.textColor)
                 } label: {
                     ZStack(alignment: .bottom) {
                         VStack {
@@ -115,7 +138,7 @@ struct IOSStyleGallerySheet: View {
 
                 Button {
                     IOSHaptics.shared.tap()
-                    page = .font
+                    navigateTo(.font)
                 } label: {
                     VStack(spacing: 4) {
                         Text(document.style.fontFamily.rawValue)
@@ -160,7 +183,7 @@ struct IOSStyleGallerySheet: View {
 
                 Button {
                     IOSHaptics.shared.tap()
-                    page = .backdrop
+                    navigateTo(.backdrop)
                 } label: {
                     VStack(spacing: 8) {
                         Text("Backdrop")
@@ -180,7 +203,7 @@ struct IOSStyleGallerySheet: View {
 
                 Button {
                     IOSHaptics.shared.tap()
-                    page = .paper
+                    navigateTo(.paper)
                 } label: {
                     ZStack(alignment: .topLeading) {
                         // Subtle ruled lines + curled corner
@@ -219,7 +242,7 @@ struct IOSStyleGallerySheet: View {
             HStack(spacing: 12) {
                 Button {
                     IOSHaptics.shared.tap()
-                    page = .styles
+                    navigateTo(.styles)
                 } label: {
                     HStack(alignment: .top) {
                         Text("Styles")
@@ -266,7 +289,7 @@ struct IOSStyleGallerySheet: View {
 
                 Button {
                     IOSHaptics.shared.tap()
-                    page = .separators
+                    navigateTo(.separators)
                 } label: {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Separators")
@@ -307,41 +330,33 @@ struct IOSStyleGallerySheet: View {
                 }
             }
 
-            // 4-icon mode switcher: None | Solid | Gradient | Image
-            HStack(spacing: 4) {
-                backdropModeButton(icon: "circle.slash", active: document.style.backdropKind == .none) {
-                    store.updateDocumentStyle(docId: document.id) {
-                        $0.backdropKind = .none
-                        $0.coverImageName = nil
+            // Native iOS 26 Liquid Glass hold-and-slide segmented control: None | Solid | Gradient | Image
+            Picker("Backdrop Mode", selection: Binding(
+                get: { document.style.backdropKind },
+                set: { newKind in
+                    IOSHaptics.shared.toggle()
+                    if newKind == .sketch {
+                        showBackdropPhotoPicker = true
+                    } else {
+                        store.updateDocumentStyle(docId: document.id) {
+                            $0.backdropKind = newKind
+                            $0.coverImageName = nil
+                            if newKind == .solid && $0.backdropColorsHex.isEmpty {
+                                $0.backdropColorsHex = ["#F5CBA7"]
+                            } else if newKind == .gradient && $0.backdropColorsHex.count < 2 {
+                                $0.backdropColorsHex = ["#FAF6EE", "#E6D9C3"]
+                            }
+                        }
                     }
                 }
-                backdropModeButton(icon: "square.inset.filled", active: document.style.backdropKind == .solid) {
-                    store.updateDocumentStyle(docId: document.id) {
-                        $0.backdropKind = .solid
-                        if $0.backdropColorsHex.isEmpty { $0.backdropColorsHex = ["#F5CBA7"] }
-                        $0.coverImageName = nil
-                    }
-                }
-                backdropModeButton(icon: "rectangle.fill.on.rectangle.fill", active: document.style.backdropKind == .gradient) {
-                    store.updateDocumentStyle(docId: document.id) {
-                        $0.backdropKind = .gradient
-                        if $0.backdropColorsHex.count < 2 { $0.backdropColorsHex = ["#FAF6EE", "#E6D9C3"] }
-                        $0.coverImageName = nil
-                    }
-                }
-                PhotosPicker(selection: $pickedCoverItem, matching: .images) {
-                    Image(systemName: "photo")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(document.style.backdropKind == .sketch ? .primary : .secondary)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 36)
-                        .background(
-                            Capsule().fill(document.style.backdropKind == .sketch ? Color.primary.opacity(0.16) : Color.clear)
-                        )
-                }
+            )) {
+                Image(systemName: "circle.slash").tag(BackdropKind.none)
+                Image(systemName: "square.inset.filled").tag(BackdropKind.solid)
+                Image(systemName: "rectangle.fill.on.rectangle.fill").tag(BackdropKind.gradient)
+                Image(systemName: "photo").tag(BackdropKind.sketch)
             }
-            .padding(4)
-            .background(Capsule().fill(Color.primary.opacity(0.08)))
+            .pickerStyle(.segmented)
+            .controlSize(.large)
 
             // 12 color swatches (2 rows x 6 cols, last is rainbow ColorPicker)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 6), spacing: 12) {
@@ -645,7 +660,7 @@ struct IOSStyleGallerySheet: View {
         HStack(spacing: 10) {
             Button {
                 IOSHaptics.shared.tap()
-                page = .hub
+                navigateTo(.hub)
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .semibold))

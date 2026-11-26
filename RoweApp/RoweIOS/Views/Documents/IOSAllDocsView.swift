@@ -22,6 +22,7 @@ struct IOSAllDocsView: View {
     let filterTitle: String
     let folderId: String?
     let isTrashMode: Bool
+    let zoomNamespace: Namespace.ID
     var onOpenDoc: (String) -> Void
 
     @State private var searchText: String = ""
@@ -323,19 +324,65 @@ struct IOSAllDocsView: View {
             }
         }
         .buttonStyle(RowePressScaleStyle())
-        .contextMenu {
-            if isTrashMode {
-                Button("Restore", systemImage: "arrow.uturn.backward") { store.restoreDocument(docId: doc.id) }
-                Button("Delete Permanently", systemImage: "trash", role: .destructive) { store.permanentlyDeleteDocument(docId: doc.id) }
-            } else {
+        .matchedTransitionSource(id: "doc-\(doc.id)", in: zoomNamespace)
+        .contextMenu { documentContextMenu(doc) }
+    }
+
+    @ViewBuilder
+    private func documentContextMenu(_ doc: RoweDocument) -> some View {
+        if isTrashMode {
+            Section {
+                Button("Restore", systemImage: "arrow.uturn.backward") {
+                    IOSHaptics.shared.tap()
+                    store.restoreDocument(docId: doc.id)
+                }
+            }
+            Section {
+                Button("Delete Permanently", systemImage: "trash", role: .destructive) {
+                    IOSHaptics.shared.destructive()
+                    store.permanentlyDeleteDocument(docId: doc.id)
+                }
+            }
+        } else {
+            Section {
+                Button("Open", systemImage: "arrow.right.circle.fill") {
+                    IOSHaptics.shared.tap()
+                    onOpenDoc(doc.id)
+                }
                 Button(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star") {
+                    IOSHaptics.shared.toggle()
                     store.toggleStarDocument(docId: doc.id)
                 }
-                Button(doc.isLocked ? "Unlock / Re-lock" : "Lock with PIN", systemImage: "lock") {
+                Button(doc.isLocked ? "Unlock / Re-lock" : "Lock with PIN", systemImage: doc.isLocked ? "lock.open" : "lock") {
+                    IOSHaptics.shared.tap()
                     store.requestToggleLock(for: doc.id)
                 }
-                Button("Duplicate", systemImage: "plus.square.on.square") { store.duplicateDocument(docId: doc.id) }
-                Button("Move to Trash", systemImage: "trash", role: .destructive) { store.moveDocumentToTrash(docId: doc.id) }
+            }
+            Section {
+                Menu("Move to Folder", systemImage: "folder") {
+                    Button("All Docs (None)", systemImage: doc.folderId == nil ? "checkmark" : "tray") {
+                        store.moveDocument(docId: doc.id, toFolderId: nil)
+                    }
+                    ForEach(store.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { folder in
+                        Button(folder.name, systemImage: doc.folderId == folder.id ? "checkmark" : folder.iconName) {
+                            store.moveDocument(docId: doc.id, toFolderId: folder.id)
+                        }
+                    }
+                }
+                Button("Duplicate", systemImage: "plus.square.on.square") {
+                    IOSHaptics.shared.tap()
+                    store.duplicateDocument(docId: doc.id)
+                }
+                Button("Copy Title", systemImage: "doc.on.doc") {
+                    IOSHaptics.shared.tap()
+                    UIPasteboard.general.string = doc.displayTitle
+                }
+            }
+            Section {
+                Button("Move to Trash", systemImage: "trash", role: .destructive) {
+                    IOSHaptics.shared.destructive()
+                    store.moveDocumentToTrash(docId: doc.id)
+                }
             }
         }
     }
@@ -376,5 +423,7 @@ struct IOSAllDocsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .matchedTransitionSource(id: "doc-\(doc.id)", in: zoomNamespace)
+        .contextMenu { documentContextMenu(doc) }
     }
 }

@@ -1549,6 +1549,10 @@ public final class WorkspaceStore {
         }
     }
 
+    public func handleAppBecameActive() {
+        triggerSyncNow()
+    }
+
     public func resetSync() {
         Task {
             await syncScheduler.resetSyncState()

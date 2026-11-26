@@ -104,9 +104,9 @@ struct IOSRootShellView: View {
             )
             .ignoresSafeArea()
 
-            // Floating Liquid Glass '+' button on bottom-right
+            // Floating Liquid Glass '+' button aligned dead-level with the iOS 26 tab bar pill
             if !shouldHideBottomControls {
-                IOSGlassCircleButton(systemImage: "plus", size: 54, iconSize: 22) {
+                IOSGlassCircleButton(systemImage: "plus", size: 56, iconSize: 22) {
                     IOSKeyboard.dismiss()
                     if selectedTab == .calendar || selectedTab == .tasks {
                         withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
@@ -118,7 +118,8 @@ struct IOSRootShellView: View {
                     }
                 }
                 .padding(.trailing, 18)
-                .padding(.bottom, 16)
+                .padding(.bottom, 22)
+                .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -237,11 +238,11 @@ final class CompactTabBarController: UITabBarController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Generous spacing between the 3 icons while keeping clean clearance before the trailing '+' button
-        let maxAvailable = max(210, view.bounds.width - 104)
+        // Flush leading x=0 so iOS 26's built-in Liquid Glass pill inset aligns crisply (~18pt from left edge)
+        let maxAvailable = max(210, view.bounds.width - 96)
         let targetWidth = min(max(244, view.bounds.width * 0.64), min(280, maxAvailable))
         let currentFrame = tabBar.frame
-        let xPosition: CGFloat = 18
+        let xPosition: CGFloat = 0
 
         tabBar.frame = CGRect(
             x: xPosition,
@@ -262,6 +263,10 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
     let resolvedAccent: Color
     let onOpenQuickAdd: () -> Void
     let onReplayOnboarding: () -> Void
+
+    @Namespace private var homeZoomNS
+    @Namespace private var tasksZoomNS
+    @Namespace private var calendarZoomNS
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -310,6 +315,7 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
         NavigationStack(path: $homePath) {
             IOSHomeView(
                 store: store,
+                zoomNamespace: homeZoomNS,
                 onOpenDoc: { id in homePath.append(.document(id)) },
                 onOpenAllDocs: { folderId, title, isTrash in
                     homePath.append(.allDocs(folderId: folderId, title: title, isTrash: isTrash))
@@ -319,7 +325,7 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
                 onOpenShared: { homePath.append(.sharedWithMe) }
             )
             .navigationDestination(for: IOSRoute.self) { route in
-                destinationView(for: route, path: $homePath)
+                destinationView(for: route, path: $homePath, zoomNS: homeZoomNS)
             }
             .background(IOSSwipeBackEnabler().frame(width: 0, height: 0))
         }
@@ -330,11 +336,12 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
             IOSCalendarTasksView(
                 store: store,
                 mode: .allTasks,
+                zoomNamespace: tasksZoomNS,
                 onOpenSettings: { tasksPath.append(.settings) },
                 onOpenQuickAdd: onOpenQuickAdd
             )
             .navigationDestination(for: IOSRoute.self) { route in
-                destinationView(for: route, path: $tasksPath)
+                destinationView(for: route, path: $tasksPath, zoomNS: tasksZoomNS)
             }
             .background(IOSSwipeBackEnabler().frame(width: 0, height: 0))
         }
@@ -345,39 +352,49 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
             IOSCalendarTasksView(
                 store: store,
                 mode: .calendar,
+                zoomNamespace: calendarZoomNS,
                 onOpenSettings: { calendarPath.append(.settings) },
                 onOpenQuickAdd: onOpenQuickAdd
             )
             .navigationDestination(for: IOSRoute.self) { route in
-                destinationView(for: route, path: $calendarPath)
+                destinationView(for: route, path: $calendarPath, zoomNS: calendarZoomNS)
             }
             .background(IOSSwipeBackEnabler().frame(width: 0, height: 0))
         }
     }
 
     @ViewBuilder
-    private func destinationView(for route: IOSRoute, path: Binding<[IOSRoute]>) -> some View {
+    private func destinationView(for route: IOSRoute, path: Binding<[IOSRoute]>, zoomNS: Namespace.ID) -> some View {
         switch route {
         case .allDocs(let folderId, let title, let isTrash):
+            let srcId = isTrash ? "row-trash" : (folderId.map { "folder-\($0)" } ?? "row-alldocs")
             IOSAllDocsView(
                 store: store,
                 filterTitle: title,
                 folderId: folderId,
                 isTrashMode: isTrash,
+                zoomNamespace: zoomNS,
                 onOpenDoc: { id in path.wrappedValue.append(.document(id)) }
             )
+            .navigationTransition(.zoom(sourceID: srcId, in: zoomNS))
         case .document(let docId):
-            if let doc = store.documents.first(where: { $0.id == docId }) {
-                IOSDocumentEditorView(store: store, document: doc)
-            } else {
-                ContentUnavailableView("Document Not Found", systemImage: "doc.questionmark")
+            Group {
+                if let doc = store.documents.first(where: { $0.id == docId }) {
+                    IOSDocumentEditorView(store: store, document: doc)
+                } else {
+                    ContentUnavailableView("Document Not Found", systemImage: "doc.questionmark")
+                }
             }
+            .navigationTransition(.zoom(sourceID: "doc-\(docId)", in: zoomNS))
         case .settings:
             IOSSettingsView(store: store, onReplayOnboarding: onReplayOnboarding)
+                .navigationTransition(.zoom(sourceID: "settings-avatar", in: zoomNS))
         case .connections:
             IOSConnectionsPlaceholderView(store: store)
+                .navigationTransition(.zoom(sourceID: "row-connections", in: zoomNS))
         case .sharedWithMe:
             IOSSharedPlaceholderView(store: store)
+                .navigationTransition(.zoom(sourceID: "row-shared", in: zoomNS))
         }
     }
 

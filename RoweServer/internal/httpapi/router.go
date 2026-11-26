@@ -15,9 +15,10 @@ import (
 func NewRouter(st store.Store, cfg config.Config) http.Handler {
 	mux := http.NewServeMux()
 
+	hub := NewEventHub()
 	authH := NewAuthHandler(st, cfg)
 	vaultH := NewVaultHandler(st)
-	syncH := NewSyncHandler(st)
+	syncH := NewSyncHandler(st, hub)
 
 	requireAuth := middleware.RequireAuth(cfg.JWTSecret)
 	globalLimiter := middleware.NewRateLimiter(cfg.RateLimitPerMin)
@@ -45,7 +46,8 @@ func NewRouter(st store.Store, cfg config.Config) http.Handler {
 	mux.Handle("GET /api/v1/vault", requireAuth(http.HandlerFunc(vaultH.GetVault)))
 	mux.Handle("PUT /api/v1/vault", requireAuth(http.HandlerFunc(vaultH.PutVault)))
 
-	// Delta Sync & Document routes
+	// Delta Sync, Real-Time SSE Hooks & Document routes
+	mux.Handle("GET /api/v1/sync/events", requireAuth(http.HandlerFunc(syncH.Events)))
 	mux.Handle("GET /api/v1/sync/pull", requireAuth(http.HandlerFunc(syncH.Pull)))
 	mux.Handle("POST /api/v1/sync/push", requireAuth(http.HandlerFunc(syncH.Push)))
 	mux.Handle("GET /api/v1/documents/{id}", requireAuth(http.HandlerFunc(syncH.GetDocument)))

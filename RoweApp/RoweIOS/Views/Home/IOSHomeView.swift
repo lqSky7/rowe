@@ -4,6 +4,7 @@ import RoweCore
 struct IOSHomeView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
+    let zoomNamespace: Namespace.ID
     var onOpenDoc: (String) -> Void
     var onOpenAllDocs: (String?, String, Bool) -> Void
     var onOpenSettings: () -> Void
@@ -41,6 +42,7 @@ struct IOSHomeView: View {
                         IOSSpaceAvatar(space: store.space, size: 38, cornerRadius: 11)
                     }
                     .buttonStyle(RowePressScaleStyle())
+                    .matchedTransitionSource(id: "settings-avatar", in: zoomNamespace)
 
                     Spacer()
 
@@ -151,29 +153,35 @@ struct IOSHomeView: View {
                                     IOSKeyboard.dismiss()
                                     onOpenDoc(doc.id)
                                 }
+                                .matchedTransitionSource(id: "doc-\(doc.id)", in: zoomNamespace)
+                                .contextMenu { documentContextMenu(doc) }
                             }
                         }
                         .padding(.horizontal, 18)
                     }
                 }
 
-                // Navigation Rows (matching IMG_5041)
+                // Navigation Rows
                 VStack(spacing: 0) {
                     homeRow(icon: "doc.text.fill", title: "All Docs", count: activeDocs.count) {
                         onOpenAllDocs(nil, "All Docs", false)
                     }
+                    .matchedTransitionSource(id: "row-alldocs", in: zoomNamespace)
                     Divider().opacity(0.25).padding(.leading, 50)
                     homeRow(icon: "cloud", title: "Connections", count: store.connections.count) {
                         onOpenConnections()
                     }
+                    .matchedTransitionSource(id: "row-connections", in: zoomNamespace)
                     Divider().opacity(0.25).padding(.leading, 50)
                     homeRow(icon: "person.2.wave.2", title: "Shared with Me", count: store.sharedDocuments.count) {
                         onOpenShared()
                     }
+                    .matchedTransitionSource(id: "row-shared", in: zoomNamespace)
                     Divider().opacity(0.25).padding(.leading, 50)
                     homeRow(icon: "trash", title: "Recently Deleted", count: trashedCount) {
                         onOpenAllDocs(nil, "Recently Deleted", true)
                     }
+                    .matchedTransitionSource(id: "row-trash", in: zoomNamespace)
                 }
                 .padding(.horizontal, 18)
 
@@ -191,6 +199,7 @@ struct IOSHomeView: View {
                                 homeRow(icon: folder.iconName, title: folder.name, count: count) {
                                     onOpenAllDocs(folder.id, folder.name, false)
                                 }
+                                .matchedTransitionSource(id: "folder-\(folder.id)", in: zoomNamespace)
                                 if folder.id != store.folders.last?.id {
                                     Divider().opacity(0.2).padding(.leading, 50)
                                 }
@@ -231,6 +240,50 @@ struct IOSHomeView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    @ViewBuilder
+    private func documentContextMenu(_ doc: RoweDocument) -> some View {
+        Section {
+            Button("Open", systemImage: "arrow.right.circle.fill") {
+                IOSHaptics.shared.tap()
+                onOpenDoc(doc.id)
+            }
+            Button(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star") {
+                IOSHaptics.shared.toggle()
+                store.toggleStarDocument(docId: doc.id)
+            }
+            Button(doc.isLocked ? "Unlock / Re-lock" : "Lock with PIN", systemImage: doc.isLocked ? "lock.open" : "lock") {
+                IOSHaptics.shared.tap()
+                store.requestToggleLock(for: doc.id)
+            }
+        }
+        Section {
+            Menu("Move to Folder", systemImage: "folder") {
+                Button("All Docs (None)", systemImage: doc.folderId == nil ? "checkmark" : "tray") {
+                    store.moveDocument(docId: doc.id, toFolderId: nil)
+                }
+                ForEach(store.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { folder in
+                    Button(folder.name, systemImage: doc.folderId == folder.id ? "checkmark" : folder.iconName) {
+                        store.moveDocument(docId: doc.id, toFolderId: folder.id)
+                    }
+                }
+            }
+            Button("Duplicate", systemImage: "plus.square.on.square") {
+                IOSHaptics.shared.tap()
+                store.duplicateDocument(docId: doc.id)
+            }
+            Button("Copy Title", systemImage: "doc.on.doc") {
+                IOSHaptics.shared.tap()
+                UIPasteboard.general.string = doc.displayTitle
+            }
+        }
+        Section {
+            Button("Move to Trash", systemImage: "trash", role: .destructive) {
+                IOSHaptics.shared.destructive()
+                store.moveDocumentToTrash(docId: doc.id)
+            }
+        }
     }
 
     private func homeRow(icon: String, title: String, count: Int, action: @escaping () -> Void) -> some View {

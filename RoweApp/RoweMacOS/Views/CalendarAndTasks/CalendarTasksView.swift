@@ -53,19 +53,15 @@ struct CalendarTasksView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11.5))
                             Text(showPreviousDays ? "Hide Previous Days" : "Show Previous Days")
-                                .font(.system(size: 12.5, weight: .medium))
-                                .contentTransition(.numericText())
+                                .font(.system(size: 12.5))
                         }
-                        .foregroundStyle(showPreviousDays ? selectedAccent : .secondary)
-                        .frame(width: 158)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .contentShape(Capsule())
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(RowePressScaleButtonStyle())
-                    .roweGlassCapsule(interactive: true)
+                    .buttonStyle(.plain)
                     .transaction { $0.animation = nil }
                     .padding(.leading, 18)
 

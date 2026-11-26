@@ -15,9 +15,11 @@ enum IOSTaskViewMode {
 struct IOSCalendarTasksView: View {
     @Bindable var store: WorkspaceStore
     let mode: IOSTaskViewMode
+    let zoomNamespace: Namespace.ID
     var onOpenSettings: () -> Void
     var onOpenQuickAdd: () -> Void
 
+    @Namespace private var taskSheetNS
     @State private var showCompleted: Bool = false
     @State private var showPreviousDays: Bool = false
     @State private var expandedCompletedDays: Set<Date> = []
@@ -25,6 +27,7 @@ struct IOSCalendarTasksView: View {
     @State private var lingerTimers: [String: Task<Void, Never>] = [:]
     @State private var showTodayCelebration: Bool = false
     @State private var celebrationBurstProgress: CGFloat = 0
+    @State private var editingTask: ResolvedTaskItem? = nil
 
     private var reduceMotion: Bool {
         store.settings.reduceAnimations
@@ -32,10 +35,6 @@ struct IOSCalendarTasksView: View {
 
     private var selectedAccent: Color {
         Color(hex: store.settings.accentColor.hex)
-    }
-
-    private var dullAccent: Color {
-        Color(hex: store.settings.accentColor.dullHex)
     }
 
     private var allTasks: [ResolvedTaskItem] {
@@ -61,6 +60,7 @@ struct IOSCalendarTasksView: View {
                         IOSSpaceAvatar(space: store.space, size: 38, cornerRadius: 11)
                     }
                     .buttonStyle(RowePressScaleStyle())
+                    .matchedTransitionSource(id: "settings-avatar", in: zoomNamespace)
 
                     Spacer()
 
@@ -99,26 +99,22 @@ struct IOSCalendarTasksView: View {
                 .padding(.top, 8)
 
                 if mode == .calendar {
-                    // Previous days toggle pill
+                    // Muted text toggle matching View Completed
                     Button {
-                        IOSHaptics.shared.toggle()
+                        IOSHaptics.shared.tap()
                         withAnimation(.easeInOut(duration: 0.22)) {
                             showPreviousDays.toggle()
                         }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 12.5, weight: .semibold))
+                                .font(.system(size: 12))
                             Text(showPreviousDays ? "Hide Previous Days" : "Show Previous Days")
                                 .font(.system(size: 13, weight: .medium))
-                                .contentTransition(.numericText())
                         }
-                        .foregroundStyle(showPreviousDays ? selectedAccent : .secondary)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 7)
-                        .roweIOSGlassCapsule(interactive: true)
+                        .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(RowePressScaleStyle())
+                    .buttonStyle(.plain)
                     .transaction { $0.animation = nil }
                     .padding(.horizontal, 18)
 
@@ -135,6 +131,15 @@ struct IOSCalendarTasksView: View {
         .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: reduceMotion)
         .scrollDismissesKeyboard(.interactively)
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $editingTask) { taskItem in
+            IOSTaskEditorSheet(store: store, item: taskItem) {
+                editingTask = nil
+            }
+            .navigationTransition(.zoom(sourceID: "task-\(taskItem.id)", in: taskSheetNS))
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+        }
     }
 
     private func daySection(for day: Date) -> some View {
@@ -170,7 +175,7 @@ struct IOSCalendarTasksView: View {
                         HStack(spacing: 6) {
                             Text("Today")
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(selectedAccent)
+                                .foregroundStyle(.primary)
                             Text("· \(weekday)")
                                 .font(.system(size: 16, weight: .regular))
                                 .foregroundStyle(.secondary)
@@ -201,17 +206,11 @@ struct IOSCalendarTasksView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(isToday ? selectedAccent : .secondary)
+                        .foregroundStyle(.secondary)
                         .padding(6)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, isToday ? 12 : 8)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(dullAccent.opacity(isToday ? 0.20 : 0.09))
-            )
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 18)
 
             if pendingTasks.isEmpty && isToday {
                 ZStack(alignment: .leading) {
@@ -242,9 +241,13 @@ struct IOSCalendarTasksView: View {
             } else {
                 VStack(spacing: 2) {
                     ForEach(pendingTasks) { item in
-                        IOSTaskRow(store: store, item: item) { newState in
+                        IOSTaskRow(store: store, item: item, onSelectTask: {
+                            IOSHaptics.shared.tap()
+                            editingTask = item
+                        }) { newState in
                             handleTaskStateChange(item: item, newState: newState, day: day)
                         }
+                        .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                         .transition(.roweUnblur)
                     }
                 }
@@ -276,9 +279,13 @@ struct IOSCalendarTasksView: View {
                 if showDayCompleted {
                     VStack(spacing: 2) {
                         ForEach(finishedTasks) { item in
-                            IOSTaskRow(store: store, item: item) { newState in
+                            IOSTaskRow(store: store, item: item, onSelectTask: {
+                                IOSHaptics.shared.tap()
+                                editingTask = item
+                            }) { newState in
                                 handleTaskStateChange(item: item, newState: newState, day: day)
                             }
+                            .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                             .transition(.roweUnblur)
                         }
                     }
@@ -317,9 +324,13 @@ struct IOSCalendarTasksView: View {
                 .padding(.top, 40)
             } else {
                 ForEach(pending) { item in
-                    IOSTaskRow(store: store, item: item) { newState in
+                    IOSTaskRow(store: store, item: item, onSelectTask: {
+                        IOSHaptics.shared.tap()
+                        editingTask = item
+                    }) { newState in
                         handleTaskStateChange(item: item, newState: newState, day: nil)
                     }
+                    .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                     .transition(.roweUnblur)
                 }
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pending.map(\.id))
@@ -328,9 +339,13 @@ struct IOSCalendarTasksView: View {
             if !completed.isEmpty {
                 DisclosureGroup("Completed (\(completed.count))", isExpanded: $showCompleted) {
                     ForEach(completed) { item in
-                        IOSTaskRow(store: store, item: item) { newState in
+                        IOSTaskRow(store: store, item: item, onSelectTask: {
+                            IOSHaptics.shared.tap()
+                            editingTask = item
+                        }) { newState in
                             handleTaskStateChange(item: item, newState: newState, day: nil)
                         }
+                        .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                     }
                 }
                 .font(.system(size: 14, weight: .semibold))
@@ -400,6 +415,7 @@ struct IOSCalendarTasksView: View {
 struct IOSTaskRow: View {
     @Bindable var store: WorkspaceStore
     let item: ResolvedTaskItem
+    var onSelectTask: (() -> Void)? = nil
     var onStateChange: ((TaskCompletionState) -> Void)? = nil
     @State private var redFlash = false
     @State private var popScale: CGFloat = 1.0
@@ -458,45 +474,147 @@ struct IOSTaskRow: View {
                 }
             }
 
-            AnimatedStrikethroughText(
-                item.block.content.isEmpty ? "Untitled Task" : item.block.content,
-                isStruck: state != .pending,
-                strikeColor: state == .canceled ? Color.red.opacity(0.85) : .secondary,
-                font: .system(size: 16),
-                lineLimit: 2,
-                reduceMotion: store.settings.reduceAnimations
-            )
-            .onTapGesture(count: 2) {
-                triggerCrossOut()
-            }
+            HStack(spacing: 8) {
+                AnimatedStrikethroughText(
+                    item.block.content.isEmpty ? "Untitled Task" : item.block.content,
+                    isStruck: state != .pending,
+                    strikeColor: state == .canceled ? Color.red.opacity(0.85) : .secondary,
+                    font: .system(size: 16),
+                    lineLimit: 2,
+                    reduceMotion: store.settings.reduceAnimations
+                )
 
-            Spacer(minLength: 6)
+                Spacer(minLength: 6)
 
-            if item.isInbox {
-                Text("Inbox")
-                    .font(.system(size: 11.5, weight: .medium))
+                if let imgs = item.block.task?.attachedImagesBase64, !imgs.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 10.5))
+                        Text("\(imgs.count)")
+                            .font(.system(size: 11, weight: .medium))
+                    }
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.08)))
-            }
+                }
 
-            if item.block.task?.repeatRule != nil {
-                Image(systemName: "repeat")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .padding(5)
-                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.08)))
+                if item.block.task?.deadlineDate != nil {
+                    Image(systemName: "flag.fill")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.orange)
+                }
+
+                if item.block.task?.reminderDate != nil {
+                    Image(systemName: "alarm")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                if item.block.task?.repeatRule != nil {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .padding(5)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.08)))
+                }
+
+                if item.isInbox {
+                    Text("Inbox")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.08)))
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelectTask?()
             }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 9)
         .contextMenu {
-            Button(state == .completed ? "Mark Incomplete" : "Complete Task", systemImage: "checkmark.circle") {
-                triggerCompleteToggle()
+            Section {
+                Menu("Schedule Task", systemImage: "calendar") {
+                    Button("Today", systemImage: "sun.max") {
+                        updateTaskMeta { $0.scheduleDate = Calendar.current.startOfDay(for: Date()) }
+                    }
+                    Button("Tomorrow", systemImage: "sunrise") {
+                        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))
+                        updateTaskMeta { $0.scheduleDate = tomorrow }
+                    }
+                    Button("Next Week", systemImage: "calendar.badge.plus") {
+                        let nextWeek = Calendar.current.date(byAdding: .day, value: 7, to: Calendar.current.startOfDay(for: Date()))
+                        updateTaskMeta { $0.scheduleDate = nextWeek }
+                    }
+                    Divider()
+                    Button("Clear Date", systemImage: "calendar.badge.minus", role: .destructive) {
+                        updateTaskMeta { $0.scheduleDate = nil; $0.repeatRule = nil }
+                    }
+                }
+                Button("Change Deadline…", systemImage: "flag") {
+                    onSelectTask?()
+                }
+                Menu("Remind me", systemImage: "alarm") {
+                    Button("In 1 Hour", systemImage: "clock") {
+                        updateTaskMeta { $0.reminderDate = Date().addingTimeInterval(3600) }
+                    }
+                    Button("Tonight (6:00 PM)", systemImage: "moon") {
+                        let base = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
+                        updateTaskMeta { $0.reminderDate = base }
+                    }
+                    Button("Tomorrow (9:00 AM)", systemImage: "sunrise") {
+                        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                        let base = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+                        updateTaskMeta { $0.reminderDate = base }
+                    }
+                    if item.block.task?.reminderDate != nil {
+                        Divider()
+                        Button("Clear Reminder", systemImage: "bell.slash", role: .destructive) {
+                            updateTaskMeta { $0.reminderDate = nil }
+                        }
+                    }
+                }
+                Menu("Repeat", systemImage: "repeat") {
+                    Button("None") {
+                        updateTaskMeta { $0.repeatRule = nil }
+                    }
+                    ForEach(RepeatFrequency.allCases, id: \.self) { freq in
+                        Button(freq.rawValue) {
+                            let start = item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: Date())
+                            let weekday = Calendar.current.component(.weekday, from: start)
+                            updateTaskMeta {
+                                $0.scheduleDate = $0.scheduleDate ?? start
+                                $0.repeatRule = RepeatRule(frequency: freq, weekdayIndex: freq == .weekly ? weekday : nil, startDate: start)
+                            }
+                        }
+                    }
+                }
             }
-            Button(state == .canceled ? "Uncross Task" : "Cross Out Task", systemImage: "xmark.circle", role: .destructive) {
-                triggerCrossOut()
+            Section {
+                Button(state == .completed ? "Mark as Incomplete" : "Mark as Completed", systemImage: "checkmark.square.fill") {
+                    triggerCompleteToggle()
+                }
+                Button(state == .canceled ? "Uncancel Task" : "Mark as Cancelled", systemImage: "xmark.square.fill") {
+                    triggerCrossOut()
+                }
+            }
+            Section {
+                Button("Open", systemImage: "arrow.right.circle.fill") {
+                    onSelectTask?()
+                }
+            }
+            Section {
+                Button("Copy", systemImage: "doc.on.doc") {
+                    IOSHaptics.shared.tap()
+                    UIPasteboard.general.string = item.block.content
+                }
+                Button("Delete Task", systemImage: "trash", role: .destructive) {
+                    IOSHaptics.shared.errorBuzz()
+                    store.deleteBlock(in: item.documentId, blockId: item.block.id)
+                }
             }
         }
     }
@@ -529,6 +647,15 @@ struct IOSTaskRow: View {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 280_000_000)
             withAnimation(.easeInOut(duration: 0.2)) { redFlash = false }
+        }
+    }
+
+    private func updateTaskMeta(_ mutate: (inout TaskMetadata) -> Void) {
+        IOSHaptics.shared.tap()
+        store.updateBlock(in: item.documentId, blockId: item.block.id) { block in
+            var meta = block.task ?? TaskMetadata(isInbox: item.isInbox)
+            mutate(&meta)
+            block.task = meta
         }
     }
 

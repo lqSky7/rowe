@@ -8,12 +8,17 @@ struct IOSDocumentEditorView: View {
     @Bindable var store: WorkspaceStore
     let document: RoweDocument
 
+    @Namespace private var editorSheetNS
     @State private var isBlockSelectionMode = false
     @State private var showStyleSheet = false
+    @State private var styleSheetHeight: CGFloat = 396
     @State private var showInsertSheet = false
     @State private var showContentTray = false
     @State private var showTOCSheet = false
     @State private var showColorSheet = false
+    @State private var isSlashMenuOpen = false
+    @State private var slashTargetBlockId: String? = nil
+    @State private var slashQuery: String = ""
     @State private var focusedBlockId: String?
     @FocusState private var isTitleFocused: Bool
 
@@ -80,22 +85,32 @@ struct IOSDocumentEditorView: View {
                         }
                     floatingActionAndInsertBar
                         .padding(.horizontal, 12)
-                        .padding(.bottom, 10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, 22)
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .transition(.roweConvergeUnblur)
                 } else if isBlockSelectionMode {
                     blockSelectionFormatSheet
                         .padding(.horizontal, 12)
+                        .padding(.bottom, 22)
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .transition(.roweConvergeUnblur)
+                } else if isSlashMenuOpen {
+                    iosSlashCommandMenu
+                        .padding(.horizontal, 12)
                         .padding(.bottom, 10)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .transition(.roweConvergeUnblur)
                 } else if focusedBlockId == nil && !isTitleFocused {
                     normalBottomBar
                         .padding(.horizontal, 18)
-                        .padding(.bottom, 12)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, 22)
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .transition(.roweConvergeUnblur)
                 }
             }
         }
         .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: isBlockSelectionMode)
+        .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: showInsertSheet)
+        .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: isSlashMenuOpen)
         .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: focusedBlockId != nil || isTitleFocused)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar {
@@ -160,13 +175,15 @@ struct IOSDocumentEditorView: View {
             }
         }
         .sheet(isPresented: $showStyleSheet) {
-            IOSStyleGallerySheet(store: store, document: document)
-                .presentationDetents([.medium, .large])
+            IOSStyleGallerySheet(store: store, document: document, preferredHeight: $styleSheetHeight)
+                .navigationTransition(.zoom(sourceID: "editor-style", in: editorSheetNS))
+                .presentationDetents([.height(styleSheetHeight), .large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
         }
         .sheet(isPresented: $showTOCSheet) {
             tocSheet
+                .navigationTransition(.zoom(sourceID: "editor-toc", in: editorSheetNS))
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
@@ -427,6 +444,7 @@ struct IOSDocumentEditorView: View {
                                 onContentChange: { val in
                                     store.activeBlockId = block.id
                                     store.updateBlock(in: document.id, blockId: block.id, coalesceUndo: true) { $0.content = val }
+                                    updateSlashTrigger(for: val, blockId: block.id)
                                 },
                                 onFocusGained: {
                                     if isBlockSelectionMode {
@@ -577,6 +595,202 @@ struct IOSDocumentEditorView: View {
         .padding(.vertical, 10)
     }
 
+    // MARK: - Slash Command Menu (/)
+
+    private struct IOSSlashCommandItem: Identifiable {
+        let id: String
+        let title: String
+        let icon: String
+        let keywords: String
+        let run: () -> Void
+    }
+
+    private var slashCommandItems: [IOSSlashCommandItem] {
+        let all: [IOSSlashCommandItem] = [
+            IOSSlashCommandItem(id: "heading", title: "Heading", icon: "textformat.size.larger", keywords: "h1 h2 h3 heading") {
+                applySlashBlockEdit { $0.textStyle = .heading }
+            },
+            IOSSlashCommandItem(id: "subtitle", title: "Subtitle", icon: "textformat.size", keywords: "subtitle h2") {
+                applySlashBlockEdit { $0.textStyle = .subtitle }
+            },
+            IOSSlashCommandItem(id: "title", title: "Title", icon: "textformat", keywords: "title h1") {
+                applySlashBlockEdit { $0.textStyle = .title }
+            },
+            IOSSlashCommandItem(id: "body", title: "Body Text", icon: "text.alignleft", keywords: "body paragraph text") {
+                applySlashBlockEdit { $0.textStyle = .body; $0.listStyle = .none; $0.decoration = .none }
+            },
+            IOSSlashCommandItem(id: "todo", title: "Task Checkbox", icon: "checkmark.square", keywords: "task todo checkbox") {
+                applySlashBlockEdit { blk in
+                    blk.listStyle = .todo
+                    if blk.task == nil { blk.task = TaskMetadata() }
+                }
+            },
+            IOSSlashCommandItem(id: "bullet", title: "Bullet List", icon: "list.bullet", keywords: "bullet list") {
+                applySlashBlockEdit { $0.listStyle = .bullet }
+            },
+            IOSSlashCommandItem(id: "numbered", title: "Numbered List", icon: "list.number", keywords: "number numbered list") {
+                applySlashBlockEdit { $0.listStyle = .numbered }
+            },
+            IOSSlashCommandItem(id: "toggle", title: "Toggle List", icon: "chevron.right.square", keywords: "toggle collapse") {
+                applySlashBlockEdit { $0.listStyle = .toggle }
+            },
+            IOSSlashCommandItem(id: "focus", title: "Focus Callout", icon: "text.quote", keywords: "focus quote callout") {
+                applySlashBlockEdit { $0.decoration = .focus }
+            },
+            IOSSlashCommandItem(id: "card", title: "Block Card", icon: "rectangle.inset.filled", keywords: "block card box") {
+                applySlashBlockEdit { $0.decoration = .block }
+            },
+            IOSSlashCommandItem(id: "code", title: "Code Block", icon: "chevron.left.forwardslash.chevron.right", keywords: "code snippet") {
+                stripTrailingSlash()
+                let target = slashTargetBlockId ?? store.activeBlockId
+                let codeBlk = Block(documentId: document.id, kind: .code, content: "", codeLanguage: "auto")
+                _ = store.insertStructuredBlock(in: document.id, after: target, block: codeBlk, focusTrailingBody: false)
+            },
+            IOSSlashCommandItem(id: "table", title: "Table", icon: "tablecells", keywords: "table grid formula") {
+                stripTrailingSlash()
+                let target = slashTargetBlockId ?? store.activeBlockId
+                let tableBlk = Block(documentId: document.id, kind: .table, content: "", tableData: TableData(rows: 3, columns: 3))
+                _ = store.insertStructuredBlock(in: document.id, after: target, block: tableBlk, focusTrailingBody: false)
+            },
+            IOSSlashCommandItem(id: "sep", title: "Separator", icon: "minus", keywords: "line divider separator hr") {
+                stripTrailingSlash()
+                store.insertOrUpdateSeparator(in: document.id, after: slashTargetBlockId ?? store.activeBlockId, style: document.style.separatorStyle)
+            },
+            IOSSlashCommandItem(id: "pagebreak", title: "Page Break", icon: "rectangle.split.1x2", keywords: "page break") {
+                stripTrailingSlash()
+                store.insertOrUpdateSeparator(in: document.id, after: slashTargetBlockId ?? store.activeBlockId, style: .pageBreak)
+            },
+            IOSSlashCommandItem(id: "style", title: "Document Style", icon: "paintbrush", keywords: "style theme paper backdrop") {
+                stripTrailingSlash()
+                IOSKeyboard.dismiss()
+                styleSheetHeight = 396
+                showStyleSheet = true
+            },
+            IOSSlashCommandItem(id: "dup", title: "Duplicate Block", icon: "plus.square.on.square", keywords: "duplicate copy") {
+                stripTrailingSlash()
+                if let id = slashTargetBlockId ?? store.activeBlockId { store.duplicateBlock(in: document.id, blockId: id) }
+            },
+            IOSSlashCommandItem(id: "del", title: "Delete Block", icon: "trash", keywords: "delete remove") {
+                if let id = slashTargetBlockId ?? store.activeBlockId { store.deleteBlock(in: document.id, blockId: id) }
+            }
+        ]
+        let q = slashQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return all }
+        return all.filter { $0.title.lowercased().contains(q) || $0.keywords.contains(q) }
+    }
+
+    private var iosSlashCommandMenu: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "command")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(slashQuery.isEmpty ? "Commands" : "/\(slashQuery)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    IOSHaptics.shared.tap()
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                        isSlashMenuOpen = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.primary.opacity(0.10)))
+                }
+                .buttonStyle(RowePressScaleStyle())
+            }
+            .padding(.horizontal, 4)
+
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(slashCommandItems) { cmd in
+                        Button {
+                            IOSHaptics.shared.tap()
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                cmd.run()
+                                isSlashMenuOpen = false
+                                slashQuery = ""
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: cmd.icon)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(cmd.id == "del" ? .red : .primary)
+                                    .frame(width: 24)
+                                Text(cmd.title)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(cmd.id == "del" ? .red : .primary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 9)
+                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.05)))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(RowePressScaleStyle())
+                    }
+                }
+            }
+            .frame(maxHeight: 210)
+        }
+        .padding(12)
+        .roweIOSGlassRoundedRect(radius: 22, interactive: true)
+        .iosDragToDismiss {
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                isSlashMenuOpen = false
+            }
+        }
+    }
+
+    private func updateSlashTrigger(for text: String, blockId: String) {
+        if let slashIdx = text.lastIndex(of: "/") {
+            let after = String(text[text.index(after: slashIdx)...])
+            let isAtStart = (slashIdx == text.startIndex)
+            let precededBySpace = !isAtStart && text[text.index(before: slashIdx)].isWhitespace
+            if (isAtStart || precededBySpace) && !after.contains(" ") && !after.contains("\n") && after.count <= 20 {
+                slashTargetBlockId = blockId
+                slashQuery = after
+                if !isSlashMenuOpen {
+                    IOSHaptics.shared.tap()
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                        isSlashMenuOpen = true
+                    }
+                }
+                return
+            }
+        }
+        if isSlashMenuOpen {
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                isSlashMenuOpen = false
+                slashQuery = ""
+            }
+        }
+    }
+
+    private func stripTrailingSlash() {
+        guard let id = slashTargetBlockId ?? store.activeBlockId else { return }
+        store.updateBlock(in: document.id, blockId: id) { blk in
+            let suffix = "/" + slashQuery
+            if blk.content == suffix {
+                blk.content = ""
+            } else if blk.content.hasSuffix(" " + suffix) {
+                blk.content = String(blk.content.dropLast(suffix.count + 1))
+            } else if blk.content.hasSuffix(suffix) {
+                blk.content = String(blk.content.dropLast(suffix.count))
+            }
+        }
+    }
+
+    private func applySlashBlockEdit(_ mutate: @escaping (inout Block) -> Void) {
+        stripTrailingSlash()
+        guard let id = slashTargetBlockId ?? store.activeBlockId else { return }
+        store.updateBlock(in: document.id, blockId: id, mutate)
+    }
+
     // MARK: - Bottom Bars (IMG_5045 & IMG_5046)
 
     private var normalBottomBar: some View {
@@ -585,6 +799,7 @@ struct IOSDocumentEditorView: View {
                 Button {
                     IOSHaptics.shared.tap()
                     IOSKeyboard.dismiss()
+                    styleSheetHeight = 396
                     showStyleSheet = true
                 } label: {
                     Image(systemName: "paintbrush")
@@ -593,6 +808,7 @@ struct IOSDocumentEditorView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(RowePressScaleStyle())
+                .matchedTransitionSource(id: "editor-style", in: editorSheetNS)
 
                 Button {
                     IOSHaptics.shared.tap()
@@ -622,6 +838,7 @@ struct IOSDocumentEditorView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(RowePressScaleStyle())
+                .matchedTransitionSource(id: "editor-toc", in: editorSheetNS)
             }
             .foregroundStyle(.primary)
             .padding(.horizontal, 6)

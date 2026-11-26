@@ -86,6 +86,12 @@ public struct SyncBatchResponse: Codable, Sendable {
     public let documents: [SyncDocumentDTO]
 }
 
+public struct RemoteSyncEvent: Codable, Sendable {
+    public let type: String
+    public let docId: String?
+    public let serverTime: Int64
+}
+
 public enum BackendError: Error, LocalizedError, Sendable {
     case invalidURL
     case serverError(String)
@@ -281,6 +287,46 @@ public actor RoweBackendClient {
             bearer: accessToken,
             body: Optional<String>.none
         )
+    }
+
+    /// Opens a long-lived Server-Sent Events (SSE) stream to receive instant cross-device sync hooks.
+    public func streamSyncEvents(
+        serverURL: String,
+        accessToken: String,
+        onEvent: @escaping @Sendable (RemoteSyncEvent) async -> Void
+    ) async throws {
+        let base = Self.normalizeServerURL(serverURL)
+        guard !base.isEmpty, let url = URL(string: base + "/api/v1/sync/events") else {
+            throw BackendError.invalidURL
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = 3600
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (bytes, response) = try await session.bytes(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw BackendError.serverError("No HTTP response")
+        }
+        if http.statusCode == 401 {
+            throw BackendError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw BackendError.serverError("SSE stream returned status \(http.statusCode)")
+        }
+
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data:") else { continue }
+            let jsonStr = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard let data = jsonStr.data(using: .utf8),
+                  let evt = try? decoder.decode(RemoteSyncEvent.self, from: data) else {
+                continue
+            }
+            await onEvent(evt)
+        }
     }
 
     public static func normalizeServerURL(_ raw: String) -> String {
