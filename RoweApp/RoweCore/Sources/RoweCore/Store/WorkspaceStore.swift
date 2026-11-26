@@ -469,8 +469,13 @@ public final class WorkspaceStore {
     }
 
     public func permanentlyDeleteDocument(docId: String) {
+        dirtyDocumentIds.remove(docId)
         documents.removeAll(where: { $0.id == docId })
+        if case .document(let currentId) = currentDestination, currentId == docId {
+            navigate(to: .allDocs)
+        }
         schedulePersistence()
+        rebuildSearchIndex()
         if authSession != nil {
             Task {
                 await deleteRemoteDocument(docId: docId)
@@ -1772,17 +1777,19 @@ public final class WorkspaceStore {
         do {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
-            let pendingIds = (lastSyncServerTimeMs == 0) ? Set(documents.map(\.id)) : dirtyDocumentIds
-            let dtos = buildSyncDTOs(for: pendingIds, encoder: encoder)
+            var pendingIds = (lastSyncServerTimeMs == 0) ? Set(documents.map(\.id)) : dirtyDocumentIds
             let sinceWatermark: Int64 = forceFullPull ? 0 : lastSyncServerTimeMs
 
-            // Step 1: Pull delta first so concurrent edits on another device are detected safely
+            // Step 1: Pull delta first so tombstones and concurrent edits on another device are applied safely
             let pulled = try await withAuthorizedSession { sess in
                 try await self.backendClient.syncPull(serverURL: sess.serverURL, accessToken: sess.accessToken, sinceMs: sinceWatermark)
             }
+            let deletedRemoteIds = Set(pulled.documents.filter { $0.deletedAt != nil }.map(\.id))
+            pendingIds.subtract(deletedRemoteIds)
             mergeRemoteDocuments(pulled.documents, localDirtyIds: pendingIds)
 
-            // Step 2: Push only dirty documents (skip HTTP POST when nothing changed locally)
+            // Step 2: Build push payload AFTER applying remote tombstones so deleted docs are never resurrected
+            let dtos = buildSyncDTOs(for: pendingIds, encoder: encoder)
             if !dtos.isEmpty {
                 let pushed = try await withAuthorizedSession { sess in
                     try await self.backendClient.syncPush(serverURL: sess.serverURL, accessToken: sess.accessToken, documents: dtos)
@@ -1799,6 +1806,7 @@ public final class WorkspaceStore {
             }
 
             dirtyDocumentIds.subtract(pendingIds)
+            dirtyDocumentIds.subtract(deletedRemoteIds)
             firstDirtyAt = dirtyDocumentIds.isEmpty ? nil : Date()
             consecutiveSyncFailures = 0
             let now = Date()
@@ -1821,6 +1829,15 @@ public final class WorkspaceStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         for r in remoteDocs {
+            // Respect server tombstones so permanently deleted docs never resurrect across devices.
+            if r.deletedAt != nil {
+                documents.removeAll(where: { $0.id == r.id })
+                dirtyDocumentIds.remove(r.id)
+                if case .document(let currentId) = currentDestination, currentId == r.id {
+                    navigate(to: .allDocs)
+                }
+                continue
+            }
             if let idx = documents.firstIndex(where: { $0.id == r.id }) {
                 let remoteUpdated = r.updatedAt ?? Date.distantPast
                 let localDoc = documents[idx]

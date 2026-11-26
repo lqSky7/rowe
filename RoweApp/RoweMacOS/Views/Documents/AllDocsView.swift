@@ -16,6 +16,11 @@ struct AllDocsView: View {
     @State private var docFrames: [String: CGRect] = [:]
     @State private var dragStartPoint: CGPoint? = nil
     @State private var dragCurrentPoint: CGPoint? = nil
+    @State private var keyMonitor: Any? = nil
+
+    private var selectedAccent: Color {
+        Color(hex: store.settings.accentColor.hex)
+    }
 
     init(
         store: WorkspaceStore,
@@ -132,10 +137,10 @@ struct AllDocsView: View {
 
                             if let rect = selectionMarqueeRect {
                                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .fill(Color.accentColor.opacity(0.14))
+                                    .fill(selectedAccent.opacity(0.14))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                            .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1)
+                                            .strokeBorder(selectedAccent.opacity(0.65), lineWidth: 1)
                                     )
                                     .frame(width: rect.width, height: rect.height)
                                     .offset(x: rect.minX, y: rect.minY)
@@ -149,8 +154,8 @@ struct AllDocsView: View {
                                 selectedDocIds.removeAll()
                             }
                         }
-                        .gesture(
-                            DragGesture(minimumDistance: 8, coordinateSpace: .named("allDocsCanvas"))
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 10, coordinateSpace: .named("allDocsCanvas"))
                                 .onChanged { value in
                                     if dragStartPoint == nil { dragStartPoint = value.startLocation }
                                     dragCurrentPoint = value.location
@@ -176,6 +181,52 @@ struct AllDocsView: View {
                 }
                 .animation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: selectedDocIds.isEmpty)
             }
+        }
+        .onAppear { installKeyMonitor() }
+        .onDisappear { removeKeyMonitor() }
+    }
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard !store.isQuickOpenPresented, store.activeTaskEditor == nil,
+                  store.pinPromptRequest == nil, !store.isLoginSheetPresented else {
+                return event
+            }
+            // Don't hijack typing when the inline search box or another text field is active
+            if NSApp.keyWindow?.firstResponder is NSText {
+                return event
+            }
+            let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "a" {
+                HapticsManager.shared.tap()
+                selectedDocIds = Set(filteredDocuments.map(\.id))
+                return nil
+            }
+            if (event.keyCode == 51 || event.keyCode == 117), mods.isEmpty, !selectedDocIds.isEmpty {
+                HapticsManager.shared.destructive()
+                let ids = selectedDocIds
+                selectedDocIds.removeAll()
+                if isTrashMode {
+                    for id in ids { store.permanentlyDeleteDocument(docId: id) }
+                } else {
+                    for id in ids { store.moveDocumentToTrash(docId: id) }
+                }
+                return nil
+            }
+            if event.keyCode == 53, mods.isEmpty, !selectedDocIds.isEmpty {
+                HapticsManager.shared.tap()
+                selectedDocIds.removeAll()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let m = keyMonitor {
+            NSEvent.removeMonitor(m)
+            keyMonitor = nil
         }
     }
 

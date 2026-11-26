@@ -50,6 +50,7 @@ public struct SyncDocumentDTO: Codable, Sendable {
     public var isTrashed: Bool
     public var version: Int64
     public var updatedAt: Date?
+    public var deletedAt: Date?
 
     public init(
         id: String,
@@ -62,7 +63,8 @@ public struct SyncDocumentDTO: Codable, Sendable {
         isStarred: Bool = false,
         isTrashed: Bool = false,
         version: Int64 = 1,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.spaceId = spaceId
@@ -75,6 +77,7 @@ public struct SyncDocumentDTO: Codable, Sendable {
         self.isTrashed = isTrashed
         self.version = version
         self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
     }
 }
 

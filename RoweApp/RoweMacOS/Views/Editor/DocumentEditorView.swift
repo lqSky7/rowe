@@ -261,10 +261,10 @@ struct DocumentEditorView: View {
 
                     if let marquee = blockMarqueeRect {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.14))
+                            .fill(Color(hex: store.settings.accentColor.hex).opacity(0.14))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1.1)
+                                    .strokeBorder(Color(hex: store.settings.accentColor.hex).opacity(0.65), lineWidth: 1.1)
                             )
                             .frame(width: marquee.width, height: marquee.height)
                             .offset(x: marquee.minX, y: marquee.minY)
@@ -281,7 +281,7 @@ struct DocumentEditorView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.system(size: 15))
-                                            .foregroundStyle(Color.accentColor)
+                                            .foregroundStyle(Color(hex: store.settings.accentColor.hex))
                                         Text("\(store.selectedBlockIds.count) Selected")
                                             .font(.system(size: 13.5, weight: .semibold))
                                     }
@@ -459,12 +459,21 @@ struct DocumentEditorView: View {
                 }
             }
 
-            // Only intercept block-level navigation when in blockSelection mode (not typing in NSTextView)
-            guard store.editorSelectionMode == .blockSelection, !store.selectedBlockIds.isEmpty else {
+            let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+            let isEditingText = NSApp.keyWindow?.firstResponder is NSText
+
+            // Cmd+A when not actively typing inside a text field selects all blocks in the document
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "a", !isEditingText {
+                HapticsManager.shared.tap()
+                store.selectAllBlocks(in: document.id)
+                return nil
+            }
+
+            // Only intercept block-level keys when blocks are selected and user isn't typing inside an NSText
+            guard !store.selectedBlockIds.isEmpty, !isEditingText else {
                 return event
             }
 
-            let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let activeId = store.activeBlockId ?? store.selectedBlockIds.first
 
             // Alt+Cmd+Up / Down: reorder selected blocks
