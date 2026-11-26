@@ -42,10 +42,12 @@ struct IOSSettingsView: View {
                     NavigationLink { IOSSpaceStatsView(store: store) } label: {
                         settingsRow("Stats", icon: "chart.pie")
                     }
+                    .buttonStyle(.plain)
                     Divider().opacity(0.2).padding(.leading, 42)
                     NavigationLink { IOSSpaceDetailView(store: store) } label: {
                         settingsRow("Space Settings", icon: "gearshape")
                     }
+                    .buttonStyle(.plain)
                 }
 
                 // General Settings Group
@@ -53,6 +55,7 @@ struct IOSSettingsView: View {
                     NavigationLink { IOSAppearanceSettingsView(store: store) } label: {
                         settingsRow("Appearance & Sound", icon: "textformat")
                     }
+                    .buttonStyle(.plain)
                     Divider().opacity(0.2).padding(.leading, 42)
                     Button {
                         IOSHaptics.shared.tap()
@@ -64,14 +67,17 @@ struct IOSSettingsView: View {
                     } label: {
                         settingsRow(store.hasVaultPin ? "Security · PIN Lock On" : "Security · Set Up PIN", icon: "lock")
                     }
+                    .buttonStyle(.plain)
                     Divider().opacity(0.2).padding(.leading, 42)
                     NavigationLink { IOSSearchSettingsView(store: store) } label: {
                         settingsRow("Global Search & Index", icon: "magnifyingglass")
                     }
+                    .buttonStyle(.plain)
                     Divider().opacity(0.2).padding(.leading, 42)
                     NavigationLink { IOSAccountSettingsView(store: store) } label: {
                         settingsRow("Account Settings", icon: "person.circle")
                     }
+                    .buttonStyle(.plain)
                 }
 
                 // GlassGlow Showcase / Reset Onboarding

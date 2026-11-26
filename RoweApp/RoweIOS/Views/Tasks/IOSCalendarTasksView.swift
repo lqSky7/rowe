@@ -97,6 +97,7 @@ struct IOSCalendarTasksView: View {
                         }
                         .buttonStyle(RowePressScaleStyle())
                     }
+                    .tint(.primary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .roweIOSGlassCapsule(interactive: true)

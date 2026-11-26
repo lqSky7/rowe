@@ -274,6 +274,7 @@ struct IOSDocumentEditorView: View {
                         .frame(width: 28, height: 28)
                 }
             }
+            .tint(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .roweIOSGlassCapsule(interactive: true)
@@ -438,10 +439,10 @@ struct IOSDocumentEditorView: View {
                         }
 
                         ZStack(alignment: .topLeading) {
-                            if block.content.isEmpty {
-                                Text(block.textStyle == .body ? "Write something…" : block.textStyle.displayName)
+                            if block.content.isEmpty && ((visibleBlocks.count == 1 && block.listStyle == .none) || block.textStyle != .body) {
+                                Text(block.textStyle == .body ? "Start writing…" : block.textStyle.displayName)
                                     .font(IOSTheme.font(for: block.textStyle, family: block.fontOverride ?? document.style.fontFamily, isBold: block.isBold))
-                                    .foregroundStyle(ink.opacity(0.35))
+                                    .foregroundStyle(ink.opacity(0.24))
                                     .padding(.top, 3)
                                     .allowsHitTesting(false)
                             }
@@ -1472,21 +1473,27 @@ private struct IOSBlockTextView: UIViewRepresentable {
         var parent: IOSBlockTextView
         var isApplyingModelSync = false
         var lastHandledRequestId: UUID?
-        var lastSignature: String = ""
+        var lastStyleSignature: String = ""
 
         init(parent: IOSBlockTextView) {
             self.parent = parent
         }
 
         func syncFromModel(_ tv: UITextView, force: Bool) {
-            let sig = "\(parent.block.content.hashValue)|\(parent.font.fontName)|\(parent.font.pointSize)|\(parent.inkColor.description)|\(parent.isStrikethrough)"
-            guard force || sig != lastSignature else { return }
-            lastSignature = sig
+            // Never interrupt active IME/autocorrect/swipe-typing marked text
+            if !force && tv.markedTextRange != nil { return }
+
+            let styleSig = "\(parent.font.fontName)|\(parent.font.pointSize)|\(parent.inkColor.description)|\(parent.isStrikethrough)"
+            let textMatches = (tv.text ?? "") == parent.block.content
+            let styleMatches = (styleSig == lastStyleSignature)
+
+            // If text & style already match, do NOTHING — preserves UIKit's native fluid caret & trackpad gliding!
+            if !force && textMatches && styleMatches { return }
+            lastStyleSignature = styleSig
 
             isApplyingModelSync = true
             defer { isApplyingModelSync = false }
 
-            let saved = tv.selectedRange
             var attrs: [NSAttributedString.Key: Any] = [
                 .font: parent.font,
                 .foregroundColor: parent.inkColor
@@ -1494,9 +1501,20 @@ private struct IOSBlockTextView: UIViewRepresentable {
             if parent.isStrikethrough {
                 attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
             }
-            tv.attributedText = NSAttributedString(string: parent.block.content, attributes: attrs)
             tv.typingAttributes = attrs
 
+            if textMatches && !force {
+                // Update attributes in-place on textStorage without replacing attributedText or resetting the caret
+                let fullRange = NSRange(location: 0, length: tv.textStorage.length)
+                tv.textStorage.beginEditing()
+                tv.textStorage.setAttributes(attrs, range: fullRange)
+                tv.textStorage.endEditing()
+                tv.invalidateIntrinsicContentSize()
+                return
+            }
+
+            let saved = tv.selectedRange
+            tv.attributedText = NSAttributedString(string: parent.block.content, attributes: attrs)
             let len = (parent.block.content as NSString).length
             let loc = min(saved.location, len)
             let selLen = min(saved.length, max(0, len - loc))
