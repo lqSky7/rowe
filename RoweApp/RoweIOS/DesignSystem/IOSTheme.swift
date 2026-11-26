@@ -256,7 +256,7 @@ struct AnimatedStrikethroughText: View {
         let start = attributed.startIndex
         let end = attributed.index(start, offsetByCharacters: struckChars)
         attributed[start..<end].strikethroughStyle = .single
-        attributed[start..<end].strikethroughColor = strikeColor
+        attributed[start..<end].strikethroughColor = UIColor(strikeColor)
         return attributed
     }
 
