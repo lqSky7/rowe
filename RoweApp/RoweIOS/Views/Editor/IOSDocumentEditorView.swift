@@ -324,6 +324,7 @@ struct IOSDocumentEditorView: View {
 
                         ForEach(segment.blocks) { block in
                             iosBlockRow(block)
+                                .transition(.roweUnblur)
                         }
 
                         if segIdx == segments.count - 1 {
@@ -331,19 +332,35 @@ struct IOSDocumentEditorView: View {
                                 .frame(height: 160)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    if isBlockSelectionMode {
+                                    if showInsertSheet {
+                                        withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                            showInsertSheet = false
+                                            showContentTray = false
+                                        }
+                                    } else if isSlashMenuOpen {
+                                        withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                            isSlashMenuOpen = false
+                                            slashQuery = ""
+                                        }
+                                    } else if isBlockSelectionMode {
                                         exitBlockSelection()
                                     } else if focusedBlockId != nil || isTitleFocused {
                                         focusedBlockId = nil
                                         isTitleFocused = false
                                         IOSKeyboard.dismiss()
+                                    } else if let last = visibleBlocks.last, last.isEditableTextBlock && last.content.isEmpty {
+                                        focusedBlockId = last.id
+                                        store.activeBlockId = last.id
                                     } else {
-                                        let b = store.insertBlock(in: document.id, after: visibleBlocks.last?.id)
-                                        focusedBlockId = b.id
+                                        withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                            let b = store.insertBlock(in: document.id, after: visibleBlocks.last?.id)
+                                            focusedBlockId = b.id
+                                        }
                                     }
                                 }
                         }
                     }
+                    .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: visibleBlocks.map(\.id))
                     .padding(.horizontal, hasCardSurface ? 20 : 18)
                     .padding(.vertical, hasCardSurface ? 22 : 10)
                     .frame(maxWidth: .infinity, alignment: .leading)

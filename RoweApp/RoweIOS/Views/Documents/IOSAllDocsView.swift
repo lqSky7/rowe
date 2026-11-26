@@ -156,15 +156,17 @@ struct IOSAllDocsView: View {
                     if isSelecting && !selectedIds.isEmpty {
                         Button(role: .destructive) {
                             IOSHaptics.shared.destructive()
-                            for id in selectedIds {
-                                if isTrashMode {
-                                    store.permanentlyDeleteDocument(docId: id)
-                                } else {
-                                    store.moveDocumentToTrash(docId: id)
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                                for id in selectedIds {
+                                    if isTrashMode {
+                                        store.permanentlyDeleteDocument(docId: id)
+                                    } else {
+                                        store.moveDocumentToTrash(docId: id)
+                                    }
                                 }
+                                selectedIds.removeAll()
+                                isSelecting = false
                             }
-                            selectedIds.removeAll()
-                            isSelecting = false
                         } label: {
                             Label("Delete (\(selectedIds.count))", systemImage: "trash")
                                 .font(.system(size: 13.5, weight: .semibold))
@@ -213,14 +215,18 @@ struct IOSAllDocsView: View {
                             case .list:
                                 VStack(spacing: 0) {
                                     ForEach(docs) { doc in
-                                        listRow(doc)
-                                        Divider().opacity(0.2).padding(.leading, 18)
+                                        VStack(spacing: 0) {
+                                            listRow(doc)
+                                            Divider().opacity(0.2).padding(.leading, 18)
+                                        }
+                                        .transition(.roweUnblur)
                                     }
                                 }
                             case .grid:
                                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 16) {
                                     ForEach(docs) { doc in
                                         gridCard(doc, height: 184)
+                                            .transition(.roweUnblur)
                                     }
                                 }
                                 .padding(.horizontal, 18)
@@ -228,14 +234,19 @@ struct IOSAllDocsView: View {
                                 VStack(spacing: 16) {
                                     ForEach(docs) { doc in
                                         gridCard(doc, height: 220)
+                                            .transition(.roweUnblur)
                                     }
                                 }
                                 .padding(.horizontal, 18)
                             }
                         }
+                        .transition(.roweUnblur)
                     }
                 }
             }
+            .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: filteredDocs.map(\.id))
+            .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: displayStyle)
+            .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: isSelecting)
             .padding(.bottom, 110)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -334,13 +345,17 @@ struct IOSAllDocsView: View {
             Section {
                 Button("Restore", systemImage: "arrow.uturn.backward") {
                     IOSHaptics.shared.tap()
-                    store.restoreDocument(docId: doc.id)
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        store.restoreDocument(docId: doc.id)
+                    }
                 }
             }
             Section {
                 Button("Delete Permanently", systemImage: "trash", role: .destructive) {
                     IOSHaptics.shared.destructive()
-                    store.permanentlyDeleteDocument(docId: doc.id)
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        store.permanentlyDeleteDocument(docId: doc.id)
+                    }
                 }
             }
         } else {
@@ -351,7 +366,9 @@ struct IOSAllDocsView: View {
                 }
                 Button(doc.isStarred ? "Unstar" : "Star", systemImage: doc.isStarred ? "star.slash" : "star") {
                     IOSHaptics.shared.toggle()
-                    store.toggleStarDocument(docId: doc.id)
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        store.toggleStarDocument(docId: doc.id)
+                    }
                 }
                 Button(doc.isLocked ? "Unlock / Re-lock" : "Lock with PIN", systemImage: doc.isLocked ? "lock.open" : "lock") {
                     IOSHaptics.shared.tap()
@@ -361,17 +378,23 @@ struct IOSAllDocsView: View {
             Section {
                 Menu("Move to Folder", systemImage: "folder") {
                     Button("All Docs (None)", systemImage: doc.folderId == nil ? "checkmark" : "tray") {
-                        store.moveDocument(docId: doc.id, toFolderId: nil)
+                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                            store.moveDocument(docId: doc.id, toFolderId: nil)
+                        }
                     }
                     ForEach(store.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { folder in
                         Button(folder.name, systemImage: doc.folderId == folder.id ? "checkmark" : folder.iconName) {
-                            store.moveDocument(docId: doc.id, toFolderId: folder.id)
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                                store.moveDocument(docId: doc.id, toFolderId: folder.id)
+                            }
                         }
                     }
                 }
                 Button("Duplicate", systemImage: "plus.square.on.square") {
                     IOSHaptics.shared.tap()
-                    store.duplicateDocument(docId: doc.id)
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        store.duplicateDocument(docId: doc.id)
+                    }
                 }
                 Button("Copy Title", systemImage: "doc.on.doc") {
                     IOSHaptics.shared.tap()
@@ -381,7 +404,9 @@ struct IOSAllDocsView: View {
             Section {
                 Button("Move to Trash", systemImage: "trash", role: .destructive) {
                     IOSHaptics.shared.destructive()
-                    store.moveDocumentToTrash(docId: doc.id)
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        store.moveDocumentToTrash(docId: doc.id)
+                    }
                 }
             }
         }
