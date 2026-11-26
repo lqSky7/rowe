@@ -77,25 +77,15 @@ struct SharePopoverView: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.04)))
 
         HStack(spacing: 8) {
-            Menu {
-                Button("Only collaborators can access") { accessPolicy = "Only collaborators can access" }
-                Button("Anyone with link can view") { accessPolicy = "Anyone with link can view" }
-                Button("Anyone with link can edit") { accessPolicy = "Anyone with link can edit" }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "lock")
-                        .font(.system(size: 11))
-                    Text(accessPolicy)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.primary.opacity(0.14)))
-            }
-            .menuStyle(.borderlessButton)
-            .tint(.secondary)
+            RoweGlassMenuPicker(
+                items: [
+                    "Only collaborators can access",
+                    "Anyone with link can view",
+                    "Anyone with link can edit"
+                ],
+                selection: $accessPolicy,
+                titleForItem: { $0 }
+            )
 
             Button {
                 HapticsManager.shared.tap()

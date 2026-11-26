@@ -19,7 +19,7 @@ public enum SeedDataFactory {
         let swiftFolder = Folder(spaceId: space.id, name: "Swift", iconName: "swift", sortOrder: 3)
         let importedFolder = Folder(spaceId: space.id, name: "Imported Notes", iconName: "folder", sortOrder: 4)
 
-        let trackerDocId = UUID().uuidString
+        let trackerDocId = "rowe-seed-tracker"
         let colName = CollectionColumn(title: "Project", type: .text, width: 170)
         let colRegion = CollectionColumn(title: "Region", type: .singleSelect, width: 110)
         let colRole = CollectionColumn(title: "Stage", type: .singleSelect, width: 120)
@@ -54,7 +54,7 @@ public enum SeedDataFactory {
             lastViewedAt: oneWeekAgo
         )
 
-        let scratchDocId = UUID().uuidString
+        let scratchDocId = "rowe-seed-scratch"
         var formulaTable = TableData(rows: 4, columns: 3, hasHeaderRow: true, hasHeaderColumn: false)
         formulaTable.cells[0][0].rawContent = "Item"
         formulaTable.cells[0][1].rawContent = "Q1"
@@ -94,7 +94,7 @@ public enum SeedDataFactory {
             lastViewedAt: oneMonthAgo
         )
 
-        let aiDocId = UUID().uuidString
+        let aiDocId = "rowe-seed-attention"
         let aiDoc = RoweDocument(
             id: aiDocId,
             spaceId: space.id,
@@ -111,7 +111,7 @@ public enum SeedDataFactory {
             lastViewedAt: oneMonthAgo
         )
 
-        let inboxDocId = UUID().uuidString
+        let inboxDocId = "rowe-seed-inbox"
         let inboxDoc = RoweDocument(
             id: inboxDocId,
             spaceId: space.id,

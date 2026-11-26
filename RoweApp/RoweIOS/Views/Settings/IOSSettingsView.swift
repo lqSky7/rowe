@@ -280,7 +280,7 @@ private struct IOSAppearanceSettingsView: View {
                         .font(.system(size: 13)).foregroundStyle(.secondary)
 
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 16) {
-                        ForEach(AccentColorChoice.allCases.filter { $0 != .multicolor }, id: \.self) { choice in
+                        ForEach(AccentColorChoice.allCases, id: \.self) { choice in
                             let selected = store.settings.accentColor == choice
                             Button {
                                 IOSHaptics.shared.tap()

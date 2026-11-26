@@ -47,7 +47,7 @@ private struct OnboardingSlide: Identifiable {
 }
 
 /// Consistent, Metal-powered GlassGlow onboarding experience shared across iOS and macOS,
-/// matching the app's native surface theme with an integrated Sign In / Create Account step.
+/// using the app's native adaptive system background and integrated Sign In / Create Account step.
 public struct RoweOnboardingView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
@@ -131,23 +131,20 @@ public struct RoweOnboardingView: View {
     private var currentSlide: OnboardingSlide { slides[step] }
     private var isAuthStep: Bool { step == slides.count - 1 }
 
-    @ViewBuilder
-    private var appNativeBackground: some View {
+    private var nativeSurfaceBackground: Color {
         #if os(macOS)
-        Color(nsColor: .controlBackgroundColor)
-            .ignoresSafeArea()
+        return Color(nsColor: .windowBackgroundColor)
         #else
-        Color(uiColor: .systemBackground)
-            .ignoresSafeArea()
+        return Color(uiColor: .systemBackground)
         #endif
     }
 
     public var body: some View {
         ZStack {
-            appNativeBackground
+            nativeSurfaceBackground
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Top bar: back button, step counter, and Skip
                 HStack {
                     if step > 0 {
                         Button {
@@ -198,7 +195,6 @@ public struct RoweOnboardingView: View {
 
                 Spacer(minLength: 14)
 
-                // Page progress dots
                 HStack(spacing: 8) {
                     ForEach(slides) { s in
                         Capsule()
@@ -226,7 +222,7 @@ public struct RoweOnboardingView: View {
                             Image(systemName: "arrow.right")
                                 .font(.system(size: 14, weight: .semibold))
                         }
-                        .foregroundStyle(colorScheme == .dark ? .black : .white)
+                        .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .background(Capsule().fill(Color.primary))
@@ -254,18 +250,9 @@ public struct RoweOnboardingView: View {
         }
     }
 
-    // MARK: - Intro Slides (Steps 1–3)
-
     private var introSlideContent: some View {
         VStack(spacing: 22) {
             ZStack {
-                if colorScheme == .light {
-                    RoundedRectangle(cornerRadius: 34, style: .continuous)
-                        .fill(Color(red: 0.08, green: 0.085, blue: 0.105))
-                        .frame(width: 174, height: 174)
-                        .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
-                }
-
                 if let symbol = currentSlide.symbol {
                     Image(systemName: symbol)
                         .font(.system(size: 92, weight: .semibold))
@@ -305,23 +292,13 @@ public struct RoweOnboardingView: View {
         }
     }
 
-    // MARK: - Integrated Flagship Sign In / Create Account Step (Step 4)
-
     private var integratedAuthSlide: some View {
         VStack(spacing: 18) {
-            ZStack {
-                if colorScheme == .light {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(Color(red: 0.08, green: 0.085, blue: 0.105))
-                        .frame(width: 118, height: 90)
-                        .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
-                }
-                RoweRibbonMark()
-                    .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
-                    .foregroundStyle(.white)
-                    .frame(width: 96, height: 72)
-                    .glassGlow(Self.paleSageMistPalette, speed: 0.72, glow: 1.05)
-            }
+            RoweRibbonMark()
+                .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
+                .foregroundStyle(.white)
+                .frame(width: 96, height: 72)
+                .glassGlow(Self.paleSageMistPalette, speed: 0.72, glow: 1.05)
 
             VStack(spacing: 6) {
                 Text(isRegisterMode ? "Create your Rowe account" : "Sign in to Rowe")
@@ -336,7 +313,6 @@ public struct RoweOnboardingView: View {
                     .frame(maxWidth: 340)
             }
 
-            // Adaptive Mode Pill
             HStack(spacing: 4) {
                 authModeTab("Sign In", active: !isRegisterMode) {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
@@ -359,37 +335,32 @@ public struct RoweOnboardingView: View {
             )
             .frame(maxWidth: 340)
 
-            // Inputs
             VStack(spacing: 10) {
                 if isRegisterMode {
-                    authFieldRow(icon: "person", placeholder: "Your name") {
-                        TextField("", text: $displayName, prompt: Text("Your name").foregroundStyle(.secondary))
+                    authFieldRow(icon: "person") {
+                        TextField("Your name", text: $displayName)
                             .textFieldStyle(.plain)
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                authFieldRow(icon: "envelope", placeholder: "Email address") {
+                authFieldRow(icon: "envelope") {
                     #if os(iOS)
-                    TextField("", text: $email, prompt: Text("Email address").foregroundStyle(.secondary))
+                    TextField("Email address", text: $email)
                         .textFieldStyle(.plain)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                         .autocorrectionDisabled()
                     #else
-                    TextField("", text: $email, prompt: Text("Email address").foregroundStyle(.secondary))
+                    TextField("Email address", text: $email)
                         .textFieldStyle(.plain)
                     #endif
                 }
 
-                authFieldRow(icon: "lock", placeholder: isRegisterMode ? "Create password (8+ chars)" : "Password") {
-                    SecureField(
-                        "",
-                        text: $password,
-                        prompt: Text(isRegisterMode ? "Create password (8+ chars)" : "Password").foregroundStyle(.secondary)
-                    )
-                    .textFieldStyle(.plain)
-                    .onSubmit { submitAuth() }
+                authFieldRow(icon: "lock") {
+                    SecureField(isRegisterMode ? "Create password (8+ chars)" : "Password", text: $password)
+                        .textFieldStyle(.plain)
+                        .onSubmit { submitAuth() }
                 }
             }
             .frame(maxWidth: 340)
@@ -415,16 +386,15 @@ public struct RoweOnboardingView: View {
                         if store.isAuthBusy {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(colorScheme == .dark ? .black : .white)
                         }
                         Text(isRegisterMode ? "Create Account & Start" : "Sign In & Continue")
                             .font(.system(size: 15, weight: .semibold))
                             .contentTransition(.numericText())
                     }
-                    .foregroundStyle(colorScheme == .dark ? .black : .white)
+                    .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 46)
-                    .background(Capsule().fill(Color.primary.opacity(canSubmitAuth ? 1.0 : 0.45)))
+                    .background(Capsule().fill(Color.primary.opacity(canSubmitAuth ? 1.0 : 0.42)))
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSubmitAuth || store.isAuthBusy)
@@ -459,7 +429,7 @@ public struct RoweOnboardingView: View {
                 .background {
                     if active {
                         Capsule()
-                            .fill(Color.primary.opacity(0.12))
+                            .fill(Color.primary.opacity(0.13))
                             .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
                             .matchedGeometryEffect(id: "onboardingAuthPill", in: modePillNS)
                     }
@@ -469,7 +439,7 @@ public struct RoweOnboardingView: View {
         .buttonStyle(.plain)
     }
 
-    private func authFieldRow<Content: View>(icon: String, placeholder: String, @ViewBuilder field: () -> Content) -> some View {
+    private func authFieldRow<Content: View>(icon: String, @ViewBuilder field: () -> Content) -> some View {
         HStack(spacing: 11) {
             Image(systemName: icon)
                 .font(.system(size: 13.5, weight: .medium))
@@ -486,7 +456,7 @@ public struct RoweOnboardingView: View {
                 .fill(Color.primary.opacity(0.06))
                 .overlay(
                     RoundedRectangle(cornerRadius: 13, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75)
+                        .strokeBorder(Color.primary.opacity(0.11), lineWidth: 0.75)
                 )
         )
     }

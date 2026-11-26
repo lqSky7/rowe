@@ -533,24 +533,27 @@ struct BlockRowView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Menu {
-                    ForEach(RoweSyntaxHighlighter.supportedLanguages, id: \.self) { lang in
-                        Button(lang.uppercased()) {
+                RoweGlassMenuPicker(
+                    items: RoweSyntaxHighlighter.supportedLanguages,
+                    selection: Binding(
+                        get: { block.codeLanguage.isEmpty ? "auto" : block.codeLanguage.lowercased() },
+                        set: { lang in
                             store.updateBlock(in: document.id, blockId: block.id) { $0.codeLanguage = lang }
                         }
+                    ),
+                    titleForItem: { lang in
+                        if lang == "auto" {
+                            return "Auto (\(detectedLang.capitalized))"
+                        }
+                        switch lang {
+                        case "javascript": return "JavaScript"
+                        case "typescript": return "TypeScript"
+                        case "json": return "JSON"
+                        case "sql": return "SQL"
+                        default: return lang.capitalized
+                        }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(detectedLang.uppercased())
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .semibold))
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                )
 
                 Spacer()
                 Button {

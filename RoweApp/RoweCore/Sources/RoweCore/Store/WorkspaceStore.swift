@@ -234,6 +234,7 @@ public final class WorkspaceStore {
             self.tags = loaded.tags
             self.sidebarSections = loaded.sidebarSections
             self.documents = loaded.documents
+            self.deduplicateInboxAndSeedDocuments()
             self.sharedDocuments = loaded.sharedDocuments.filter {
                 !($0.title == "Shared Feature Roadmap" && $0.sharedByName == "Collaborator")
             }
@@ -1882,6 +1883,104 @@ public final class WorkspaceStore {
                 documents.append(newDoc)
             }
         }
+        deduplicateInboxAndSeedDocuments()
+    }
+
+    /// Merges duplicate "Tasks Inbox" documents (which previously got different random UUIDs on macOS vs iOS)
+    /// and removes duplicate task blocks so tasks never double across devices.
+    private func deduplicateInboxAndSeedDocuments() {
+        let inboxIndices = documents.indices.filter {
+            documents[$0].title == "Tasks Inbox" && !documents[$0].isTrashed
+        }
+        if !inboxIndices.isEmpty {
+            // Prefer the deterministic seed ID if present, otherwise the first inbox document
+            let canonicalIdx = inboxIndices.first(where: { documents[$0].id == "rowe-seed-inbox" }) ?? inboxIndices[0]
+            let canonicalId = documents[canonicalIdx].id
+            var mergedBlocks = documents[canonicalIdx].blocks
+            var duplicateIdsToRemove: [String] = []
+
+            for idx in inboxIndices where idx != canonicalIdx {
+                mergedBlocks.append(contentsOf: documents[idx].blocks)
+                duplicateIdsToRemove.append(documents[idx].id)
+            }
+
+            let deduped = deduplicatedTaskBlocks(mergedBlocks, documentId: canonicalId)
+            let changed = !duplicateIdsToRemove.isEmpty || deduped.count != documents[canonicalIdx].blocks.count
+            if changed {
+                documents[canonicalIdx].blocks = deduped
+                documents[canonicalIdx].updatedAt = Date()
+                if !duplicateIdsToRemove.isEmpty {
+                    let removeSet = Set(duplicateIdsToRemove)
+                    documents.removeAll(where: { removeSet.contains($0.id) })
+                    dirtyDocumentIds.insert(canonicalId)
+                    if authSession != nil {
+                        for dupId in duplicateIdsToRemove {
+                            Task { await deleteRemoteDocument(docId: dupId) }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also collapse duplicate fresh-install seed docs created before deterministic IDs
+        let seedMap: [(title: String, canonicalId: String)] = [
+            ("Product Launch Tracker", "rowe-seed-tracker"),
+            ("Quick Scratchpad", "rowe-seed-scratch"),
+            ("Attention Mechanisms", "rowe-seed-attention")
+        ]
+        for entry in seedMap {
+            let matching = documents.filter { $0.title == entry.title && !$0.isTrashed }
+            guard matching.count > 1 else { continue }
+            let keeper = matching.first(where: { $0.id == entry.canonicalId })
+                ?? matching.max(by: { $0.updatedAt < $1.updatedAt })
+                ?? matching[0]
+            let extras = matching.filter { $0.id != keeper.id }
+            let extraIds = Set(extras.map(\.id))
+            documents.removeAll(where: { extraIds.contains($0.id) })
+            if authSession != nil {
+                for extraId in extraIds {
+                    Task { await deleteRemoteDocument(docId: extraId) }
+                }
+            }
+        }
+    }
+
+    private func deduplicatedTaskBlocks(_ blocks: [Block], documentId: String) -> [Block] {
+        var result: [Block] = []
+        var seenTaskKeyToIndex: [String: Int] = [:]
+        var seenBlockIds: Set<String> = []
+        let cal = Calendar.current
+
+        for var block in blocks {
+            block.documentId = documentId
+            if seenBlockIds.contains(block.id) { continue }
+            seenBlockIds.insert(block.id)
+
+            if block.isTask {
+                let normalizedTitle = block.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let dayKey: String
+                if let sched = block.task?.scheduleDate {
+                    let comps = cal.dateComponents([.year, .month, .day], from: sched)
+                    dayKey = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+                } else {
+                    dayKey = "unscheduled"
+                }
+                let key = "\(normalizedTitle)|\(dayKey)"
+                if let existingIdx = seenTaskKeyToIndex[key] {
+                    // Keep whichever copy is more recently updated (or completed/canceled over pending)
+                    let existing = result[existingIdx]
+                    let existingDone = (existing.task?.state ?? .pending) != .pending
+                    let candidateDone = (block.task?.state ?? .pending) != .pending
+                    if (candidateDone && !existingDone) || block.updatedAt > existing.updatedAt {
+                        result[existingIdx] = block
+                    }
+                    continue
+                }
+                seenTaskKeyToIndex[key] = result.count
+            }
+            result.append(block)
+        }
+        return result
     }
 
     // MARK: - Zero-Knowledge PIN-Locked Notes

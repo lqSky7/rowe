@@ -150,25 +150,22 @@ struct TaskDateRepeatPicker: View {
                 Image(systemName: "repeat")
                     .font(.system(size: 12.5))
                     .foregroundStyle(.primary)
-                Menu {
-                    Button("None") {
-                        HapticsManager.shared.tap()
-                        repeatRule = nil
-                    }
-                    ForEach(RepeatFrequency.allCases, id: \.self) { freq in
-                        Button(freq.rawValue) {
-                            HapticsManager.shared.tap()
-                            let base = selectedDate ?? Date()
-                            let wd = calendar.component(.weekday, from: base)
-                            repeatRule = RepeatRule(frequency: freq, weekdayIndex: wd, startDate: base)
+                RoweGlassMenuPicker(
+                    items: [Optional<RepeatFrequency>.none] + RepeatFrequency.allCases.map { Optional($0) },
+                    selection: Binding(
+                        get: { repeatRule?.frequency },
+                        set: { freq in
+                            if let freq {
+                                let base = selectedDate ?? Date()
+                                let wd = calendar.component(.weekday, from: base)
+                                repeatRule = RepeatRule(frequency: freq, weekdayIndex: wd, startDate: base)
+                            } else {
+                                repeatRule = nil
+                            }
                         }
-                    }
-                } label: {
-                    Text(repeatRule?.displayLabel ?? "Add Repeat...")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(repeatRule == nil ? .secondary : .primary)
-                }
-                .menuStyle(.borderlessButton)
+                    ),
+                    titleForItem: { $0?.rawValue ?? "None" }
+                )
 
                 Spacer()
 

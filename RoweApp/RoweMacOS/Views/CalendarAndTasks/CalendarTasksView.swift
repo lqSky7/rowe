@@ -20,6 +20,14 @@ struct CalendarTasksView: View {
         store.settings.reduceAnimations
     }
 
+    private var selectedAccent: Color {
+        Color(hex: store.settings.accentColor.hex)
+    }
+
+    private var dullAccent: Color {
+        Color(hex: store.settings.accentColor.dullHex)
+    }
+
     private var visibleDays: [Date] {
         let today = calendar.startOfDay(for: Date())
         let startOffset = showPreviousDays ? -3 : 0
@@ -50,7 +58,7 @@ struct CalendarTasksView: View {
                                 .font(.system(size: 12.5, weight: .medium))
                                 .contentTransition(.numericText())
                         }
-                        .foregroundStyle(showPreviousDays ? Color.accentColor : .secondary)
+                        .foregroundStyle(showPreviousDays ? selectedAccent : .secondary)
                         .frame(width: 158)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -118,14 +126,14 @@ struct CalendarTasksView: View {
             HStack(spacing: 5) {
                 Image(systemName: isOn.wrappedValue ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12))
-                    .foregroundStyle(isOn.wrappedValue ? Color.accentColor : .secondary)
+                    .foregroundStyle(isOn.wrappedValue ? selectedAccent : .secondary)
                 Text(title)
                     .font(.system(size: 12.5, weight: isOn.wrappedValue ? .medium : .regular))
             }
             .foregroundStyle(isOn.wrappedValue ? .primary : .secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(Capsule().fill(isOn.wrappedValue ? Color.accentColor.opacity(0.14) : Color.clear))
+            .background(Capsule().fill(isOn.wrappedValue ? dullAccent.opacity(0.24) : Color.clear))
         }
         .buttonStyle(RowePressScaleButtonStyle())
     }
@@ -146,11 +154,11 @@ struct CalendarTasksView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(dayNumberTitle(day))
                     .font(.system(size: 13.5, weight: .bold))
-                    .foregroundStyle(isToday ? Color.accentColor : .primary)
+                    .foregroundStyle(isToday ? selectedAccent : .primary)
                 if let relative = relativeDayLabel(day) {
                     Text(relative)
                         .font(.system(size: 13, weight: isToday ? .semibold : .medium))
-                        .foregroundStyle(isToday ? Color.accentColor : .secondary)
+                        .foregroundStyle(isToday ? selectedAccent : .secondary)
                 }
                 Text(weekdayName(day))
                     .font(.system(size: 12.5))
@@ -162,11 +170,7 @@ struct CalendarTasksView: View {
             .frame(minHeight: isToday ? 160 : 88)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.accentColor.opacity(isToday ? 0.18 : 0.08))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(isToday ? 0.30 : 0.14), lineWidth: 0.75)
-                    )
+                    .fill(dullAccent.opacity(isToday ? 0.22 : 0.10))
             )
 
             VStack(alignment: .leading, spacing: 10) {
@@ -213,7 +217,7 @@ struct CalendarTasksView: View {
                     }
 
                     if isToday {
-                        GlassPillButton("Add Task", systemImage: "checkmark.square", tint: .accentColor) {
+                        GlassPillButton("Add Task", systemImage: "checkmark.square", tint: selectedAccent) {
                             withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
                                 store.activeTaskEditor = .create(defaultDate: day)
                             }
@@ -234,10 +238,8 @@ struct CalendarTasksView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
                         .strokeBorder(
-                            isDayDropTarget
-                                ? Color.accentColor.opacity(0.75)
-                                : (isToday ? Color.accentColor.opacity(0.24) : Color.clear),
-                            lineWidth: isDayDropTarget ? 1.5 : 1.0
+                            isDayDropTarget ? selectedAccent.opacity(0.75) : Color.clear,
+                            lineWidth: isDayDropTarget ? 1.5 : 0
                         )
                 )
                 .shadow(color: isToday ? .black.opacity(0.07) : .clear, radius: 18, y: 6)
@@ -268,7 +270,7 @@ struct CalendarTasksView: View {
                     let angle = Double(idx) * (360.0 / 10.0) * .pi / 180.0
                     let radius = 16.0 + celebrationBurstProgress * 34.0
                     Circle()
-                        .fill(idx.isMultiple(of: 2) ? Color.accentColor : Color.green)
+                        .fill(idx.isMultiple(of: 2) ? selectedAccent : Color.green)
                         .frame(width: 4.5, height: 4.5)
                         .offset(x: 18 + cos(angle) * radius, y: sin(angle) * radius)
                         .opacity(Double(1.0 - celebrationBurstProgress))
@@ -279,7 +281,7 @@ struct CalendarTasksView: View {
             HStack(spacing: 7) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(selectedAccent)
                 Text("All clear for today")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -297,7 +299,7 @@ struct CalendarTasksView: View {
         return VStack(alignment: .leading, spacing: 0) {
             if isDropTarget {
                 Capsule()
-                    .fill(Color.accentColor)
+                    .fill(selectedAccent)
                     .frame(height: 2.5)
                     .padding(.bottom, 5)
                     .transition(.opacity)

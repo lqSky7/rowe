@@ -1,9 +1,10 @@
 import SwiftUI
 import RoweCore
 
-/// Flagship Liquid Glass + GlassGlow Sign In sheet for iOS (no Server URL clutter).
+/// Native adaptive Liquid Glass + GlassGlow Sign In sheet for iOS (matches app background, zero Server URL clutter).
 struct IOSLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
 
     @State private var isRegisterMode = false
@@ -18,16 +19,8 @@ struct IOSLoginSheet: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.045, green: 0.05, blue: 0.068),
-                    Color(red: 0.075, green: 0.08, blue: 0.105),
-                    Color(red: 0.035, green: 0.04, blue: 0.055)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 20) {
@@ -38,7 +31,7 @@ struct IOSLoginSheet: View {
                             dismiss()
                         }
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(.secondary)
                     }
 
                     RoweRibbonMark()
@@ -51,11 +44,11 @@ struct IOSLoginSheet: View {
                     VStack(spacing: 6) {
                         Text(isRegisterMode ? "Create your Rowe account" : "Sign in to Rowe")
                             .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .contentTransition(.numericText())
                         Text("Sync documents, profile, and zero-knowledge locked notes.")
                             .font(.system(size: 13.5))
-                            .foregroundStyle(.white.opacity(0.64))
+                            .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
 
@@ -76,37 +69,33 @@ struct IOSLoginSheet: View {
                     .padding(4)
                     .background(
                         Capsule()
-                            .fill(Color.white.opacity(0.08))
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75))
+                            .fill(Color.primary.opacity(0.07))
+                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75))
                     )
 
                     VStack(spacing: 12) {
                         if isRegisterMode {
                             fieldRow(icon: "person") {
-                                TextField("", text: $displayName, prompt: Text("Your name").foregroundStyle(.white.opacity(0.38)))
+                                TextField("Your name", text: $displayName)
                             }
                         }
 
                         fieldRow(icon: "envelope") {
-                            TextField("", text: $email, prompt: Text("Email address").foregroundStyle(.white.opacity(0.38)))
+                            TextField("Email address", text: $email)
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.emailAddress)
                                 .autocorrectionDisabled()
                         }
 
                         fieldRow(icon: "lock") {
-                            SecureField(
-                                "",
-                                text: $password,
-                                prompt: Text(isRegisterMode ? "Create password (8+ chars)" : "Password").foregroundStyle(.white.opacity(0.38))
-                            )
+                            SecureField(isRegisterMode ? "Create password (8+ chars)" : "Password", text: $password)
                         }
                     }
 
                     if let err = store.authErrorMessage, !err.isEmpty {
                         Text(err)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color(red: 1.0, green: 0.56, blue: 0.54))
+                            .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
@@ -114,14 +103,14 @@ struct IOSLoginSheet: View {
                         submit()
                     } label: {
                         HStack(spacing: 8) {
-                            if store.isAuthBusy { ProgressView().tint(.black) }
+                            if store.isAuthBusy { ProgressView() }
                             Text(isRegisterMode ? "Create Account" : "Sign In")
                                 .font(.system(size: 16, weight: .semibold))
                         }
-                        .foregroundStyle(.black)
+                        .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
-                        .background(Capsule().fill(Color.white.opacity(canSubmit ? 1.0 : 0.45)))
+                        .background(Capsule().fill(Color.primary.opacity(canSubmit ? 1.0 : 0.42)))
                     }
                     .buttonStyle(RowePressScaleStyle())
                     .disabled(!canSubmit || store.isAuthBusy)
@@ -144,14 +133,14 @@ struct IOSLoginSheet: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13.5, weight: active ? .semibold : .medium))
-                .foregroundStyle(active ? .white : .white.opacity(0.55))
+                .foregroundStyle(active ? .primary : .secondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
                 .background {
                     if active {
                         Capsule()
-                            .fill(Color.white.opacity(0.16))
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
+                            .fill(Color.primary.opacity(0.13))
+                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
                             .matchedGeometryEffect(id: "iosLoginPill", in: modePillNS)
                     }
                 }
@@ -163,20 +152,20 @@ struct IOSLoginSheet: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.52))
+                .foregroundStyle(.secondary)
                 .frame(width: 20)
             content()
                 .font(.system(size: 15))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
         }
         .padding(.horizontal, 16)
         .frame(height: 48)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+                .fill(Color.primary.opacity(0.06))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75)
+                        .strokeBorder(Color.primary.opacity(0.11), lineWidth: 0.75)
                 )
         )
     }

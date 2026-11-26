@@ -23,9 +23,19 @@ struct IOSCalendarTasksView: View {
     @State private var expandedCompletedDays: Set<Date> = []
     @State private var lingeringTaskIds: Set<String> = []
     @State private var lingerTimers: [String: Task<Void, Never>] = [:]
+    @State private var showTodayCelebration: Bool = false
+    @State private var celebrationBurstProgress: CGFloat = 0
 
     private var reduceMotion: Bool {
         store.settings.reduceAnimations
+    }
+
+    private var selectedAccent: Color {
+        Color(hex: store.settings.accentColor.hex)
+    }
+
+    private var dullAccent: Color {
+        Color(hex: store.settings.accentColor.dullHex)
     }
 
     private var allTasks: [ResolvedTaskItem] {
@@ -89,10 +99,10 @@ struct IOSCalendarTasksView: View {
                 .padding(.top, 8)
 
                 if mode == .calendar {
-                    // Previous days toggle pill (also toggled by pull-to-refresh)
+                    // Previous days toggle pill
                     Button {
                         IOSHaptics.shared.toggle()
-                        withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                        withAnimation(.easeInOut(duration: 0.22)) {
                             showPreviousDays.toggle()
                         }
                     } label: {
@@ -103,17 +113,18 @@ struct IOSCalendarTasksView: View {
                                 .font(.system(size: 13, weight: .medium))
                                 .contentTransition(.numericText())
                         }
-                        .foregroundStyle(showPreviousDays ? Color.accentColor : .secondary)
+                        .foregroundStyle(showPreviousDays ? selectedAccent : .secondary)
                         .padding(.horizontal, 13)
                         .padding(.vertical, 7)
                         .roweIOSGlassCapsule(interactive: true)
                     }
                     .buttonStyle(RowePressScaleStyle())
+                    .transaction { $0.animation = nil }
                     .padding(.horizontal, 18)
 
                     ForEach(visibleDays, id: \.self) { day in
                         daySection(for: day)
-                            .transition(.roweUnblur)
+                            .transition(.opacity)
                     }
                 } else {
                     allTasksBody
@@ -159,7 +170,7 @@ struct IOSCalendarTasksView: View {
                         HStack(spacing: 6) {
                             Text("Today")
                                 .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(selectedAccent)
                             Text("· \(weekday)")
                                 .font(.system(size: 16, weight: .regular))
                                 .foregroundStyle(.secondary)
@@ -190,7 +201,7 @@ struct IOSCalendarTasksView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(isToday ? Color.accentColor : .secondary)
+                        .foregroundStyle(isToday ? selectedAccent : .secondary)
                         .padding(6)
                 }
             }
@@ -198,22 +209,33 @@ struct IOSCalendarTasksView: View {
             .padding(.vertical, isToday ? 12 : 8)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.accentColor.opacity(isToday ? 0.16 : 0.07))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(isToday ? 0.28 : 0.12), lineWidth: 0.75)
-                    )
+                    .fill(dullAccent.opacity(isToday ? 0.20 : 0.09))
             )
             .padding(.horizontal, 14)
 
             if pendingTasks.isEmpty && isToday {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.accentColor)
-                    Text("All clear for today")
-                        .font(.system(size: 14.5))
-                        .foregroundStyle(.secondary)
+                ZStack(alignment: .leading) {
+                    if !reduceMotion && celebrationBurstProgress > 0 && celebrationBurstProgress < 1 {
+                        ForEach(0..<10, id: \.self) { idx in
+                            let angle = Double(idx) * (360.0 / 10.0) * .pi / 180.0
+                            let radius = 14.0 + celebrationBurstProgress * 30.0
+                            Circle()
+                                .fill(idx.isMultiple(of: 2) ? selectedAccent : Color.green)
+                                .frame(width: 4.5, height: 4.5)
+                                .offset(x: 16 + cos(angle) * radius, y: sin(angle) * radius)
+                                .opacity(Double(1.0 - celebrationBurstProgress))
+                        }
+                        .allowsHitTesting(false)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 13))
+                            .foregroundStyle(selectedAccent)
+                        Text("All clear for today")
+                            .font(.system(size: 14.5))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 6)
@@ -221,7 +243,7 @@ struct IOSCalendarTasksView: View {
                 VStack(spacing: 2) {
                     ForEach(pendingTasks) { item in
                         IOSTaskRow(store: store, item: item) { newState in
-                            handleTaskStateChange(item: item, newState: newState)
+                            handleTaskStateChange(item: item, newState: newState, day: day)
                         }
                         .transition(.roweUnblur)
                     }
@@ -255,7 +277,7 @@ struct IOSCalendarTasksView: View {
                     VStack(spacing: 2) {
                         ForEach(finishedTasks) { item in
                             IOSTaskRow(store: store, item: item) { newState in
-                                handleTaskStateChange(item: item, newState: newState)
+                                handleTaskStateChange(item: item, newState: newState, day: day)
                             }
                             .transition(.roweUnblur)
                         }
@@ -296,7 +318,7 @@ struct IOSCalendarTasksView: View {
             } else {
                 ForEach(pending) { item in
                     IOSTaskRow(store: store, item: item) { newState in
-                        handleTaskStateChange(item: item, newState: newState)
+                        handleTaskStateChange(item: item, newState: newState, day: nil)
                     }
                     .transition(.roweUnblur)
                 }
@@ -307,7 +329,7 @@ struct IOSCalendarTasksView: View {
                 DisclosureGroup("Completed (\(completed.count))", isExpanded: $showCompleted) {
                     ForEach(completed) { item in
                         IOSTaskRow(store: store, item: item) { newState in
-                            handleTaskStateChange(item: item, newState: newState)
+                            handleTaskStateChange(item: item, newState: newState, day: nil)
                         }
                     }
                 }
@@ -319,7 +341,7 @@ struct IOSCalendarTasksView: View {
         }
     }
 
-    private func handleTaskStateChange(item: ResolvedTaskItem, newState: TaskCompletionState) {
+    private func handleTaskStateChange(item: ResolvedTaskItem, newState: TaskCompletionState, day: Date?) {
         let id = item.block.id
         lingerTimers[id]?.cancel()
         lingerTimers.removeValue(forKey: id)
@@ -327,22 +349,50 @@ struct IOSCalendarTasksView: View {
         if newState == .pending {
             withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
                 lingeringTaskIds.remove(id)
+                showTodayCelebration = false
                 store.setTaskState(docId: item.documentId, blockId: id, state: newState)
             }
             return
         }
 
-        // Linger for 2 seconds so the sweeping strikethrough & red cross-out play cleanly before moving to Completed
+        // Linger for 3s so double-tap red cross-out or quick undo never races with removal.
         lingeringTaskIds.insert(id)
         store.setTaskState(docId: item.documentId, blockId: id, state: newState)
 
         lingerTimers[id] = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled else { return }
             _ = withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
                 lingeringTaskIds.remove(id)
             }
             lingerTimers.removeValue(forKey: id)
+            if let day {
+                checkTodayCelebration(for: day)
+            }
+        }
+    }
+
+    private func checkTodayCelebration(for day: Date) {
+        let cal = Calendar.current
+        guard cal.isDateInToday(day) else { return }
+        let todayTasks = store.allTasks().filter { item in
+            if let sched = item.block.task?.scheduleDate {
+                return cal.isDate(sched, inSameDayAs: day)
+            }
+            return true
+        }
+        let remaining = todayTasks.filter {
+            ($0.block.task?.state ?? .pending) == .pending || lingeringTaskIds.contains($0.block.id)
+        }
+        if !todayTasks.isEmpty && remaining.isEmpty {
+            IOSHaptics.shared.taskComplete()
+            celebrationBurstProgress = 0
+            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                showTodayCelebration = true
+            }
+            withAnimation(.easeOut(duration: 0.75)) {
+                celebrationBurstProgress = 1.0
+            }
         }
     }
 }
@@ -353,20 +403,25 @@ struct IOSTaskRow: View {
     var onStateChange: ((TaskCompletionState) -> Void)? = nil
     @State private var redFlash = false
     @State private var popScale: CGFloat = 1.0
+    @State private var lastTapDate: Date = .distantPast
 
     private var state: TaskCompletionState {
         item.block.task?.state ?? .pending
     }
 
+    private var selectedAccent: Color {
+        Color(hex: store.settings.accentColor.hex)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
-            // Single tap = complete/uncomplete, Double tap = cross out (red flash + xmark)
+            // Zero-delay single tap = complete/uncomplete; rapid double-tap (< 0.34s) = red cross-out
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(
                         redFlash || state == .canceled
                             ? Color.red
-                            : (state == .completed ? Color.accentColor : Color.clear)
+                            : (state == .completed ? selectedAccent : Color.clear)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -392,11 +447,15 @@ struct IOSTaskRow: View {
             .scaleEffect(popScale)
             .frame(width: 22, height: 22)
             .contentShape(Rectangle().inset(by: -10))
-            .onTapGesture(count: 2) {
-                triggerCrossOut()
-            }
-            .onTapGesture(count: 1) {
-                triggerCompleteToggle()
+            .onTapGesture {
+                let now = Date()
+                if now.timeIntervalSince(lastTapDate) < 0.34 {
+                    lastTapDate = .distantPast
+                    triggerCrossOut()
+                } else {
+                    lastTapDate = now
+                    triggerCompleteToggle()
+                }
             }
 
             AnimatedStrikethroughText(

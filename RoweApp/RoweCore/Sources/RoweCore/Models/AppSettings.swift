@@ -7,31 +7,62 @@ public enum AppearanceMode: String, Codable, CaseIterable, Sendable {
 }
 
 public enum AccentColorChoice: String, Codable, CaseIterable, Sendable {
-    case multicolor = "Multicolor"
-    case blue = "Blue"
-    case cyan = "Cyan"
-    case teal = "Teal"
-    case green = "Green"
-    case yellow = "Yellow"
-    case orange = "Orange"
-    case pink = "Pink"
-    case purple = "Purple"
-    case indigo = "Indigo"
+    case slateSky = "Slate Sky"
+    case babyPink = "Baby Pink"
+    case dustyPeach = "Dusty Peach"
+    case sageMist = "Sage Mist"
+    case lavenderHaze = "Lavender"
+    case periwinkle = "Periwinkle"
+    case buttercream = "Buttercream"
+    case dustyRose = "Dusty Rose"
+    case warmSand = "Warm Sand"
     case graphite = "Graphite"
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let direct = AccentColorChoice(rawValue: raw) {
+            self = direct
+            return
+        }
+        switch raw {
+        case "Blue", "Cyan", "Multicolor": self = .slateSky
+        case "Pink": self = .babyPink
+        case "Orange": self = .dustyPeach
+        case "Green", "Teal": self = .sageMist
+        case "Purple", "Indigo": self = .lavenderHaze
+        case "Yellow": self = .buttercream
+        default: self = .slateSky
+        }
+    }
 
     public var hex: String {
         switch self {
-        case .multicolor: "#007AFF"
-        case .blue: "#2E7CF6"
-        case .cyan: "#0D8BB8"
-        case .teal: "#0E9488"
-        case .green: "#169C53"
-        case .yellow: "#EAB308"
-        case .orange: "#F97316"
-        case .pink: "#EC4899"
-        case .purple: "#8B1D8E"
-        case .indigo: "#6D28D9"
-        case .graphite: "#4B5563"
+        case .slateSky: "#8BA5BE"
+        case .babyPink: "#F2B8C6"
+        case .dustyPeach: "#E4B49A"
+        case .sageMist: "#98B4A3"
+        case .lavenderHaze: "#B6A8D4"
+        case .periwinkle: "#99A8D4"
+        case .buttercream: "#E2CFA0"
+        case .dustyRose: "#CFA0AC"
+        case .warmSand: "#C5B7A5"
+        case .graphite: "#6E737D"
+        }
+    }
+
+    /// Muted, lower-saturation shade for calm surface fills like Calendar date cards.
+    public var dullHex: String {
+        switch self {
+        case .slateSky: "#6E8296"
+        case .babyPink: "#C89BA6"
+        case .dustyPeach: "#BA9582"
+        case .sageMist: "#7C9386"
+        case .lavenderHaze: "#9489AC"
+        case .periwinkle: "#7E8AA8"
+        case .buttercream: "#B7A986"
+        case .dustyRose: "#A8848E"
+        case .warmSand: "#9E9386"
+        case .graphite: "#636770"
         }
     }
 }
