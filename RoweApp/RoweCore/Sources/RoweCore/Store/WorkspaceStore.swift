@@ -63,6 +63,11 @@ public enum AllDocsSortOrder: String, CaseIterable, Sendable {
     case titleAsc = "Name"
 }
 
+public enum SyncPulseDirection: String, Sendable {
+    case sent
+    case received
+}
+
 /// Mirrors Craft's v2BlockDetailsViewController_SelectionState.
 public enum EditorSelectionMode: Equatable, Sendable {
     case noSelection
@@ -136,6 +141,8 @@ public final class WorkspaceStore {
     public var isAuthBusy: Bool = false
     public var lastSyncStatusMessage: String?
     public var lastSuccessfulSyncAt: Date?
+    public var syncPulseId: UUID = UUID()
+    public var syncPulseDirection: SyncPulseDirection? = nil
     public var hasLoadedFromDisk: Bool = false
     public var isSyncing: Bool = false
     private var dirtyDocumentIds: Set<String> = []
@@ -1791,6 +1798,10 @@ public final class WorkspaceStore {
             let deletedRemoteIds = Set(pulled.documents.filter { $0.deletedAt != nil }.map(\.id))
             pendingIds.subtract(deletedRemoteIds)
             mergeRemoteDocuments(pulled.documents, localDirtyIds: pendingIds)
+            if !pulled.documents.isEmpty {
+                syncPulseDirection = .received
+                syncPulseId = UUID()
+            }
 
             // Step 2: Build push payload AFTER applying remote tombstones so deleted docs are never resurrected
             let dtos = buildSyncDTOs(for: pendingIds, encoder: encoder)
@@ -1799,6 +1810,8 @@ public final class WorkspaceStore {
                     try await self.backendClient.syncPush(serverURL: sess.serverURL, accessToken: sess.accessToken, documents: dtos)
                 }
                 lastSyncServerTimeMs = max(pulled.serverTime, pushed.serverTime)
+                syncPulseDirection = .sent
+                syncPulseId = UUID()
             } else {
                 lastSyncServerTimeMs = max(lastSyncServerTimeMs, pulled.serverTime)
             }

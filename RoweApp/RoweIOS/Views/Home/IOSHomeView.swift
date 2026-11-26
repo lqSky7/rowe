@@ -39,7 +39,13 @@ struct IOSHomeView: View {
                         IOSKeyboard.dismiss()
                         onOpenSettings()
                     } label: {
-                        IOSSpaceAvatar(space: store.space, size: 38, cornerRadius: 11)
+                        IOSSpaceAvatar(
+                            space: store.space,
+                            size: 38,
+                            cornerRadius: 11,
+                            syncPulseId: store.syncPulseId,
+                            syncPulseDirection: store.syncPulseDirection
+                        )
                     }
                     .buttonStyle(RowePressScaleStyle())
                     .matchedTransitionSource(id: "settings-avatar", in: zoomNamespace)

@@ -95,39 +95,94 @@ struct IOSGlassPillButton: View {
     }
 }
 
-/// Space avatar supporting custom base64 photo or clean initials badge.
+/// Space avatar supporting custom base64 photo or clean initials badge,
+/// with a directional blurred-PFP-color sync glow (in -> out when sent, out -> in when received).
 struct IOSSpaceAvatar: View {
     let space: Space
     var size: CGFloat = 36
     var cornerRadius: CGFloat = 10
+    var syncPulseId: UUID? = nil
+    var syncPulseDirection: SyncPulseDirection? = nil
+
+    @State private var glowScale: CGFloat = 1.0
+    @State private var glowOpacity: Double = 0.0
+    @State private var glowTask: Task<Void, Never>?
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        if let b64 = space.avatarImageBase64,
+           let data = Data(base64Encoded: b64),
+           let img = UIImage(data: data) {
+            Image(uiImage: img)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            ZStack {
+                LinearGradient(
+                    colors: [Color(hex: "#2D323E"), Color(hex: "#191C24")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Text(String(space.name.prefix(2)).uppercased())
+                    .font(.system(size: size * 0.36, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+        }
+    }
 
     var body: some View {
-        Group {
-            if let b64 = space.avatarImageBase64,
-               let data = Data(base64Encoded: b64),
-               let img = UIImage(data: data) {
-                Image(uiImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                ZStack {
-                    LinearGradient(
-                        colors: [Color(hex: "#2D323E"), Color(hex: "#191C24")],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    Text(String(space.name.prefix(2)).uppercased())
-                        .font(.system(size: size * 0.36, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
+        ZStack {
+            avatarContent
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .saturation(1.45)
+                .blur(radius: 10)
+                .scaleEffect(glowScale)
+                .opacity(glowOpacity)
+                .allowsHitTesting(false)
+
+            avatarContent
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
+                )
+        }
+        .onChange(of: syncPulseId) { _, _ in
+            guard let dir = syncPulseDirection else { return }
+            triggerGlow(direction: dir)
+        }
+    }
+
+    private func triggerGlow(direction: SyncPulseDirection) {
+        glowTask?.cancel()
+        switch direction {
+        case .sent:
+            // Minimal in -> out blurred PFP aura
+            glowScale = 0.96
+            glowOpacity = 0.50
+            withAnimation(.easeOut(duration: 0.72)) {
+                glowScale = 1.30
+                glowOpacity = 0.0
+            }
+        case .received:
+            // Minimal out -> in blurred PFP aura
+            glowScale = 1.32
+            glowOpacity = 0.0
+            withAnimation(.easeOut(duration: 0.34)) {
+                glowScale = 1.06
+                glowOpacity = 0.48
+            }
+            glowTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 340_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeIn(duration: 0.38)) {
+                    glowScale = 0.96
+                    glowOpacity = 0.0
                 }
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
-        )
     }
 }
 

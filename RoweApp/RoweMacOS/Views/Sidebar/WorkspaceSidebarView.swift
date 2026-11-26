@@ -7,7 +7,8 @@ struct WorkspaceSidebarView: View {
     @State private var isCreatingFolder = false
     @State private var newFolderName = ""
     @State private var isImportingMarkdown = false
-    @State private var isSyncGlowing = false
+    @State private var glowScale: CGFloat = 1.0
+    @State private var glowOpacity: Double = 0.0
     @State private var syncGlowTask: Task<Void, Never>?
 
     private var starredSection: SidebarSectionState {
@@ -391,41 +392,32 @@ struct WorkspaceSidebarView: View {
                 }
             } label: {
                 ZStack {
-                    Circle()
-                        .fill(Color.green.opacity(isSyncGlowing ? 0.35 : 0))
-                        .frame(width: 16, height: 16)
-                        .blur(radius: 3)
+                    // Blurred profile-picture aura: in -> out when sent, out -> in when received
+                    sidebarAvatarGraphic
+                        .frame(width: 24, height: 24)
+                        .clipShape(Circle())
+                        .saturation(1.45)
+                        .blur(radius: 7)
+                        .scaleEffect(glowScale)
+                        .opacity(glowOpacity)
+                        .allowsHitTesting(false)
 
-                    Circle()
-                        .fill(isSyncGlowing ? Color.green : Color.clear)
+                    sidebarAvatarGraphic
+                        .frame(width: 22, height: 22)
+                        .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
                         .overlay(
-                            Circle()
-                                .strokeBorder(
-                                    isSyncGlowing ? Color.green : Color.primary.opacity(0.18),
-                                    lineWidth: 1.1
-                                )
+                            RoundedRectangle(cornerRadius: 6.5, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
                         )
-                        .frame(width: 8.5, height: 8.5)
-                        .shadow(color: isSyncGlowing ? Color.green.opacity(0.85) : .clear, radius: 4)
                 }
-                .frame(width: 16, height: 16)
-                .contentShape(Circle())
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(store.isSignedIn ? "Signed in (\(store.authSession?.user.email ?? ""))" : "Sign In / Sync Account")
-            .onChange(of: store.lastSuccessfulSyncAt) { _, newValue in
-                guard newValue != nil else { return }
-                syncGlowTask?.cancel()
-                withAnimation(.easeOut(duration: 0.2)) {
-                    isSyncGlowing = true
-                }
-                syncGlowTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_050_000_000)
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeInOut(duration: 0.45)) {
-                        isSyncGlowing = false
-                    }
-                }
+            .onChange(of: store.syncPulseId) { _, _ in
+                guard let dir = store.syncPulseDirection else { return }
+                triggerAvatarSyncGlow(direction: dir)
             }
 
             Spacer()
@@ -440,6 +432,58 @@ struct WorkspaceSidebarView: View {
             }
             .buttonStyle(.plain)
             .help("Quick Open (⌘O)")
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarAvatarGraphic: some View {
+        if let b64 = store.space.avatarImageBase64,
+           let data = Data(base64Encoded: b64),
+           let nsImg = NSImage(data: data) {
+            Image(nsImage: nsImg)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            ZStack {
+                LinearGradient(
+                    colors: [Color(hex: "#2D323E"), Color(hex: "#191C24")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Text(String(store.space.name.prefix(2)).uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+
+    private func triggerAvatarSyncGlow(direction: SyncPulseDirection) {
+        syncGlowTask?.cancel()
+        switch direction {
+        case .sent:
+            // Minimal in -> out blurred PFP aura
+            glowScale = 0.96
+            glowOpacity = 0.52
+            withAnimation(.easeOut(duration: 0.72)) {
+                glowScale = 1.32
+                glowOpacity = 0.0
+            }
+        case .received:
+            // Minimal out -> in blurred PFP aura
+            glowScale = 1.34
+            glowOpacity = 0.0
+            withAnimation(.easeOut(duration: 0.34)) {
+                glowScale = 1.06
+                glowOpacity = 0.50
+            }
+            syncGlowTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 340_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeIn(duration: 0.38)) {
+                    glowScale = 0.96
+                    glowOpacity = 0.0
+                }
+            }
         }
     }
 }
