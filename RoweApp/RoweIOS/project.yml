@@ -16,14 +16,19 @@ targets:
       - path: DesignSystem
       - path: Views
       - path: ../RoweShared
-      - path: Resources
+      - path: Resources/Assets.xcassets
+      - path: Resources/Wallpapers
         buildPhase: resources
+        type: folder
     settings:
       base:
         INFOPLIST_FILE: Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.rowe.ios
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconDark
     dependencies:
       - package: RoweCore
       - sdk: Metal.framework
