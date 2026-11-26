@@ -1,0 +1,22 @@
+{
+  "name": "Rowe",
+  "identifier": "com.rowe.ios.source",
+  "subtitle": "Native documents, tasks, and zero-knowledge notes",
+  "description": "Sideloaded builds of Rowe for iOS. Add this source in FlareStore, AltStore, or SideStore to install and update Rowe directly from GitHub Releases.",
+  "iconURL": "https://raw.githubusercontent.com/lqSky7/rowe/main/altstore/icon.png",
+  "website": "https://github.com/lqSky7/rowe",
+  "tintColor": "#1E293B",
+  "apps": [
+    {
+      "name": "Rowe",
+      "bundleIdentifier": "com.rowe.ios",
+      "developerName": "lqSky7",
+      "subtitle": "Native documents, daily tasks, and zero-knowledge notes",
+      "localizedDescription": "A native iOS workspace for crafted documents, daily planning, and zero-knowledge PIN-locked notes synced across Mac and iPhone.",
+      "iconURL": "https://raw.githubusercontent.com/lqSky7/rowe/main/altstore/icon.png",
+      "tintColor": "#1E293B",
+      "category": "productivity",
+      "versions": []
+    }
+  ]
+}

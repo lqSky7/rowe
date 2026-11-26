@@ -1,0 +1,46 @@
+{
+  "fill": {
+    "automatic-gradient": "srgb:0.96,0.95,0.92,1.0"
+  },
+  "fill-specializations": [
+    {
+      "appearance": "dark",
+      "value": {
+        "automatic-gradient": "srgb:0.11,0.12,0.15,1.0"
+      }
+    },
+    {
+      "appearance": "tinted",
+      "value": {
+        "automatic-gradient": "srgb:0.14,0.15,0.18,1.0"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "glass": true,
+          "image-name": "rowe-glyph.svg",
+          "name": "Rowe Ribbon",
+          "position": {
+            "scale": 0.84,
+            "translation-in-points": [0, 0]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.25
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.45
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": ["watchOS"],
+    "squares": "shared"
+  }
+}

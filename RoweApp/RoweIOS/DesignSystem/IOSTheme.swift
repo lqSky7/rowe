@@ -1,0 +1,168 @@
+import SwiftUI
+import UIKit
+import RoweCore
+
+extension Color {
+    init(hex: String) {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: cleaned).scanHexInt64(&int)
+        let r, g, b, a: UInt64
+        switch cleaned.count {
+        case 6:
+            (r, g, b, a) = ((int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF, 255)
+        case 8:
+            (r, g, b, a) = ((int >> 24) & 0xFF, (int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
+        default:
+            (r, g, b, a) = (128, 128, 128, 255)
+        }
+        self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: Double(a) / 255)
+    }
+}
+
+enum IOSTheme {
+    static func craftSpring(reduceMotion: Bool = false) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.14) : .spring(response: 0.34, dampingFraction: 0.80)
+    }
+
+    static func microSpring(reduceMotion: Bool = false) -> Animation {
+        reduceMotion ? .linear(duration: 0.10) : .spring(response: 0.24, dampingFraction: 0.78)
+    }
+
+    static func font(for style: BlockTextStyle, family: FontFamily, isBold: Bool = false) -> Font {
+        let size: CGFloat = {
+            switch style {
+            case .title: 27
+            case .subtitle: 21
+            case .heading: 18
+            case .strong: 16
+            case .body, .pageRegular, .pageCard: 15.5
+            case .caption: 13
+            }
+        }()
+        let weight: Font.Weight = {
+            if isBold { return .bold }
+            switch style {
+            case .title: return .bold
+            case .subtitle, .heading, .strong: return .semibold
+            default: return .regular
+            }
+        }()
+
+        switch family {
+        case .system: return .system(size: size, weight: weight, design: .default)
+        case .serif: return .system(size: size, weight: weight, design: .serif)
+        case .mono: return .system(size: size, weight: weight, design: .monospaced)
+        case .rounded: return .system(size: size, weight: weight, design: .rounded)
+        case .baskerville: return .custom(weight == .bold || weight == .semibold ? "Baskerville-SemiBold" : "Baskerville", size: size)
+        case .georgia: return .custom(weight == .bold || weight == .semibold ? "Georgia-Bold" : "Georgia", size: size)
+        case .avenir: return .custom(weight == .bold || weight == .semibold ? "AvenirNext-DemiBold" : "AvenirNext-Regular", size: size)
+        case .palatino: return .custom(weight == .bold || weight == .semibold ? "Palatino-Bold" : "Palatino-Roman", size: size)
+        }
+    }
+}
+
+struct RowePressScaleStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .opacity(configuration.isPressed ? 0.88 : 1.0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.75), value: configuration.isPressed)
+    }
+}
+
+private struct RoweUnblurModifier: ViewModifier {
+    let active: Bool
+    let scale: CGFloat
+    let blurRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active ? 0 : 1)
+            .scaleEffect(active ? scale : 1)
+            .blur(radius: active ? blurRadius : 0)
+    }
+}
+
+extension AnyTransition {
+    static var roweUnblur: AnyTransition {
+        .modifier(
+            active: RoweUnblurModifier(active: true, scale: 0.96, blurRadius: 5),
+            identity: RoweUnblurModifier(active: false, scale: 1, blurRadius: 0)
+        )
+    }
+
+    static var roweConvergeUnblur: AnyTransition {
+        .modifier(
+            active: RoweUnblurModifier(active: true, scale: 0.94, blurRadius: 10),
+            identity: RoweUnblurModifier(active: false, scale: 1, blurRadius: 0)
+        )
+    }
+}
+
+extension Date {
+    var craftRelativeString: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(self) {
+            let secs = Int(Date().timeIntervalSince(self))
+            if secs < 60 { return "Just Now" }
+            if secs < 3600 { return "\(secs / 60)m ago" }
+            return "\(secs / 3600)h ago"
+        }
+        if cal.isDateInYesterday(self) { return "Yesterday" }
+        let f = DateFormatter()
+        f.dateFormat = "d MMM"
+        return f.string(from: self)
+    }
+}
+
+/// Reliably dismisses the iOS software keyboard from any SwiftUI screen.
+@MainActor
+enum IOSKeyboard {
+    static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+/// Centralized UIKit haptic feedback engine respecting `store.settings.enableHaptics`.
+@MainActor
+final class IOSHaptics {
+    static let shared = IOSHaptics()
+    var isEnabled: Bool = true
+
+    private let light = UIImpactFeedbackGenerator(style: .light)
+    private let medium = UIImpactFeedbackGenerator(style: .medium)
+    private let rigid = UIImpactFeedbackGenerator(style: .rigid)
+    private let selectionGen = UISelectionFeedbackGenerator()
+    private let notif = UINotificationFeedbackGenerator()
+
+    func tap() {
+        guard isEnabled else { return }
+        light.impactOccurred(intensity: 0.7)
+    }
+
+    func toggle() {
+        guard isEnabled else { return }
+        selectionGen.selectionChanged()
+    }
+
+    func snap() {
+        guard isEnabled else { return }
+        medium.impactOccurred(intensity: 0.85)
+    }
+
+    func taskComplete() {
+        guard isEnabled else { return }
+        notif.notificationOccurred(.success)
+    }
+
+    func errorBuzz() {
+        guard isEnabled else { return }
+        notif.notificationOccurred(.error)
+    }
+
+    func destructive() {
+        guard isEnabled else { return }
+        rigid.impactOccurred(intensity: 0.9)
+    }
+}

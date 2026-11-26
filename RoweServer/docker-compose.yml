@@ -1,0 +1,15 @@
+services:
+  rowe-server:
+    build: .
+    container_name: rowe-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8080"
+      - "172.17.0.1:8090:8080"
+    env_file:
+      - .env
+    volumes:
+      - rowe_data:/data
+
+volumes:
+  rowe_data:

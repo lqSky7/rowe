@@ -1,0 +1,35 @@
+# macOS / Xcode / Swift
+.DS_Store
+**/.DS_Store
+*.xcuserstate
+*.xcuserdatad/
+DerivedData/
+.build/
+.swiftpm/
+RoweApp/build/
+RoweApp/RoweIOS/RoweIOS.xcodeproj/
+*.ipa
+*.dmg
+*.zip
+
+# Go / Backend / Secrets
+.env
+RoweServer/.env
+RoweServer/bin/
+RoweServer/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Internal RE notes & reference screenshots (do not push)
+archived/
+calendar-and-tasks/
+connections/
+document-editor-and-inspector/
+document-sidebar/
+documents-and-navigation/
+ios-screenshots/
+settings/
+share-publish-export/
+slash-menu/
+v2-editor-spec/

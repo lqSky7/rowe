@@ -1,0 +1,71 @@
+name: Release macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version tag (defaults to Info.plist CFBundleShortVersionString)"
+        required: false
+      notes:
+        description: "Release notes"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
+jobs:
+  release-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version & notes
+        id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_NOTES: ${{ inputs.notes }}
+        run: |
+          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" RoweApp/RoweMacOS/App/Info.plist)
+          VERSION="${INPUT_VERSION:-$PLIST_VERSION}"
+          TAG="macos-v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          NOTES="${INPUT_NOTES:-Rowe macOS ${VERSION}}"
+          printf '%s\n' "$NOTES" > "$RUNNER_TEMP/notes.txt"
+
+      - name: Build Rowe.app
+        working-directory: RoweApp
+        run: |
+          chmod +x install.sh
+          ./install.sh --build-only
+
+      - name: Package .zip and .dmg
+        id: pkg
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          ZIP_NAME="Rowe-macOS-${V}.zip"
+          DMG_NAME="Rowe-macOS-${V}.dmg"
+          ditto -c -k --sequesterRsrc --keepParent RoweApp/build/Rowe.app "$ZIP_NAME"
+          hdiutil create -volname "Rowe" -srcfolder RoweApp/build/Rowe.app -ov -format UDZO "$DMG_NAME"
+          echo "zip=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+          echo "dmg=$DMG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${{ steps.pkg.outputs.zip }}" "${{ steps.pkg.outputs.dmg }}" --clobber
+          else
+            gh release create "$TAG" "${{ steps.pkg.outputs.zip }}" "${{ steps.pkg.outputs.dmg }}" \
+              --target "${{ github.sha }}" \
+              --title "Rowe macOS ${{ steps.meta.outputs.version }}" \
+              --notes-file "$RUNNER_TEMP/notes.txt"
+          fi

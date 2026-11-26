@@ -1,0 +1,32 @@
+name: RoweIOS
+options:
+  bundleIdPrefix: com.rowe
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  RoweCore:
+    path: ../RoweCore
+targets:
+  RoweIOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: App
+      - path: DesignSystem
+      - path: Views
+      - path: ../RoweShared
+      - path: Resources
+        buildPhase: resources
+    settings:
+      base:
+        INFOPLIST_FILE: Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.rowe.ios
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: RoweCore
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: CryptoKit.framework

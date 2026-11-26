@@ -1,0 +1,413 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+/* Begin PBXBuildFile section */
+		31E63321A84A47AC91BC43F4 /* RoweCore in Frameworks */ = {isa = PBXBuildFile; productRef = C09F0DCA76AD4A99B907B9D7 /* RoweCore */; };
+		BE2F2226B81C4F2CA9300935 /* RoweApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E33752AABEC44A168D21C2F7 /* RoweApp.swift */; };
+		43A8BBDA77F14E27880C87EE /* CraftWindowShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = B21791ACF630432FB010BFA1 /* CraftWindowShell.swift */; };
+		3C5E5EF109D94322AD36847B /* GlassComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27EDB13446944D6EAEAFFB24 /* GlassComponents.swift */; };
+		AA0148D5C20E4565B803E063 /* ThemeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81A01F51B59C4949B4B58C12 /* ThemeTokens.swift */; };
+		AEADC4C98C704AE192F027F3 /* HapticsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573815A81E7A4B1CA5E46C2F /* HapticsManager.swift */; };
+		97C6FBC8F65E454A8A4AEEB1 /* SoundManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DFC18661B7A4A02961799F6 /* SoundManager.swift */; };
+		65ED781F7E4E46B19C9BE015 /* AllTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9775D30DD1B7494D95C8AEB4 /* AllTasksView.swift */; };
+		9C0FA7ACFD8A440D87422C4A /* CalendarTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87177C7C9A8447CB3F359B8 /* CalendarTasksView.swift */; };
+		438B9E3A7258484A93FE1EAF /* TaskCheckboxControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D9E3B6C53F8470589D01BC1 /* TaskCheckboxControl.swift */; };
+		63D5E3A88DED4790B8CE2415 /* TaskDateRepeatPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC44B4F43E24D048C33FDAE /* TaskDateRepeatPicker.swift */; };
+		8F9B7436AB2446E4B97943E4 /* TaskEditorPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A5A78346D34C3CA39AF2A4 /* TaskEditorPopover.swift */; };
+		F7E7D64EA1C94F7C95035CC4 /* ConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6867CC82F33424E94B03FB8 /* ConnectionsView.swift */; };
+		9E5B32C791AA45A68B4E33AC /* AllDocsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C893D1464BD48B0B82E8662 /* AllDocsView.swift */; };
+		4BBB8FB91D794EE788970196 /* SharedWithMeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F10236896BE47439666430C /* SharedWithMeView.swift */; };
+		E8035357550E43E0A1F958EF /* BlockRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2ACA80BFB344F418482197A /* BlockRowView.swift */; };
+		A91F35E1307D47A6B52C94CC /* DocumentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A73EB9E16BD443E8021875D /* DocumentEditorView.swift */; };
+		1C1D19DB1DBF47AAB263AA84 /* RightInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B92FFD332BCF400BBB022B79 /* RightInspectorView.swift */; };
+		0548726B39F5422FB2D09968 /* SlashMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8792DB593D3940B985F3B135 /* SlashMenuView.swift */; };
+		C13AED83EDCE4A9E96FBAC40 /* StyleGalleryModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B19A044E3BF40A2BBB731F5 /* StyleGalleryModal.swift */; };
+		90FF1106C7334181B481AE14 /* QuickOpenPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00EF73EB4CB749E9BD4DA6C3 /* QuickOpenPanel.swift */; };
+		7941DF2A24E54E728D9555C3 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CFDCFE8A4A4C00AB5F5178 /* SettingsView.swift */; };
+		353079856B0A476C94E9C0DE /* SharePopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60E035C49E614A049A1DA6E5 /* SharePopoverView.swift */; };
+		BE4588F99459435C950E6CE1 /* DocumentSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4721DCFA7B83422BBEF7007A /* DocumentSidebarView.swift */; };
+		4F58CD2CB2AA4068B2A07ADA /* WorkspaceSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 220729399EFE40DB977D3C49 /* WorkspaceSidebarView.swift */; };
+/* End PBXBuildFile section */
+/* Begin PBXFileReference section */
+		B204E458907B4CE7901C8675 /* Rowe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Rowe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4E6BDB189EAE43AFB7BB57C6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = RoweMacOS/App/Info.plist; sourceTree = "<group>"; };
+		1D57B89327CD40DF8507C45A /* RoweMacOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = RoweMacOS.entitlements; path = RoweMacOS/App/RoweMacOS.entitlements; sourceTree = "<group>"; };
+		E33752AABEC44A168D21C2F7 /* RoweApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RoweApp.swift; path = "RoweMacOS/App/RoweApp.swift"; sourceTree = "<group>"; };
+		B21791ACF630432FB010BFA1 /* CraftWindowShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CraftWindowShell.swift; path = "RoweMacOS/DesignSystem/CraftWindowShell.swift"; sourceTree = "<group>"; };
+		27EDB13446944D6EAEAFFB24 /* GlassComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GlassComponents.swift; path = "RoweMacOS/DesignSystem/GlassComponents.swift"; sourceTree = "<group>"; };
+		81A01F51B59C4949B4B58C12 /* ThemeTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ThemeTokens.swift; path = "RoweMacOS/DesignSystem/ThemeTokens.swift"; sourceTree = "<group>"; };
+		573815A81E7A4B1CA5E46C2F /* HapticsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HapticsManager.swift; path = "RoweMacOS/Services/HapticsManager.swift"; sourceTree = "<group>"; };
+		6DFC18661B7A4A02961799F6 /* SoundManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SoundManager.swift; path = "RoweMacOS/Services/SoundManager.swift"; sourceTree = "<group>"; };
+		9775D30DD1B7494D95C8AEB4 /* AllTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AllTasksView.swift; path = "RoweMacOS/Views/CalendarAndTasks/AllTasksView.swift"; sourceTree = "<group>"; };
+		A87177C7C9A8447CB3F359B8 /* CalendarTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarTasksView.swift; path = "RoweMacOS/Views/CalendarAndTasks/CalendarTasksView.swift"; sourceTree = "<group>"; };
+		7D9E3B6C53F8470589D01BC1 /* TaskCheckboxControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskCheckboxControl.swift; path = "RoweMacOS/Views/CalendarAndTasks/TaskCheckboxControl.swift"; sourceTree = "<group>"; };
+		6CC44B4F43E24D048C33FDAE /* TaskDateRepeatPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskDateRepeatPicker.swift; path = "RoweMacOS/Views/CalendarAndTasks/TaskDateRepeatPicker.swift"; sourceTree = "<group>"; };
+		C5A5A78346D34C3CA39AF2A4 /* TaskEditorPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskEditorPopover.swift; path = "RoweMacOS/Views/CalendarAndTasks/TaskEditorPopover.swift"; sourceTree = "<group>"; };
+		B6867CC82F33424E94B03FB8 /* ConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ConnectionsView.swift; path = "RoweMacOS/Views/Connections/ConnectionsView.swift"; sourceTree = "<group>"; };
+		7C893D1464BD48B0B82E8662 /* AllDocsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AllDocsView.swift; path = "RoweMacOS/Views/Documents/AllDocsView.swift"; sourceTree = "<group>"; };
+		0F10236896BE47439666430C /* SharedWithMeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SharedWithMeView.swift; path = "RoweMacOS/Views/Documents/SharedWithMeView.swift"; sourceTree = "<group>"; };
+		D2ACA80BFB344F418482197A /* BlockRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BlockRowView.swift; path = "RoweMacOS/Views/Editor/BlockRowView.swift"; sourceTree = "<group>"; };
+		6A73EB9E16BD443E8021875D /* DocumentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DocumentEditorView.swift; path = "RoweMacOS/Views/Editor/DocumentEditorView.swift"; sourceTree = "<group>"; };
+		B92FFD332BCF400BBB022B79 /* RightInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = RightInspectorView.swift; path = "RoweMacOS/Views/Editor/RightInspectorView.swift"; sourceTree = "<group>"; };
+		8792DB593D3940B985F3B135 /* SlashMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SlashMenuView.swift; path = "RoweMacOS/Views/Editor/SlashMenuView.swift"; sourceTree = "<group>"; };
+		7B19A044E3BF40A2BBB731F5 /* StyleGalleryModal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StyleGalleryModal.swift; path = "RoweMacOS/Views/Editor/StyleGalleryModal.swift"; sourceTree = "<group>"; };
+		00EF73EB4CB749E9BD4DA6C3 /* QuickOpenPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = QuickOpenPanel.swift; path = "RoweMacOS/Views/QuickOpen/QuickOpenPanel.swift"; sourceTree = "<group>"; };
+		77CFDCFE8A4A4C00AB5F5178 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SettingsView.swift; path = "RoweMacOS/Views/Settings/SettingsView.swift"; sourceTree = "<group>"; };
+		60E035C49E614A049A1DA6E5 /* SharePopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SharePopoverView.swift; path = "RoweMacOS/Views/ShareExport/SharePopoverView.swift"; sourceTree = "<group>"; };
+		4721DCFA7B83422BBEF7007A /* DocumentSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DocumentSidebarView.swift; path = "RoweMacOS/Views/Sidebar/DocumentSidebarView.swift"; sourceTree = "<group>"; };
+		220729399EFE40DB977D3C49 /* WorkspaceSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WorkspaceSidebarView.swift; path = "RoweMacOS/Views/Sidebar/WorkspaceSidebarView.swift"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+/* Begin PBXFrameworksBuildPhase section */
+		0431780AE0184AC0891E4717 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				31E63321A84A47AC91BC43F4 /* RoweCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+/* Begin PBXGroup section */
+		870C1A740CC5417E8C456E14 = {
+			isa = PBXGroup;
+			children = (
+				40E14F1902F348C99E65B399 /* RoweMacOS */,
+				6C7912788A3340A8A1C5C921 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		6C7912788A3340A8A1C5C921 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B204E458907B4CE7901C8675 /* Rowe.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		40E14F1902F348C99E65B399 /* RoweMacOS */ = {
+			isa = PBXGroup;
+			children = (
+				88D73EEDC1054C0086FD81C2 /* App */,
+				7903244589904C0581E2D3E8 /* DesignSystem */,
+				7C6C52B7B8004749839EE225 /* Services */,
+				31897A36D0F44032B6FA154D /* Views/CalendarAndTasks */,
+				E0989CBFAF844EEFA03BDC31 /* Views/Connections */,
+				77A9E318338B4DEFAAA88684 /* Views/Documents */,
+				C7B0ECB41EF142AD9B123728 /* Views/Editor */,
+				598F0D5DD71C422A878C10B3 /* Views/QuickOpen */,
+				961978C9226C469CB3BC7598 /* Views/Settings */,
+				297E46417C884AD1B6F4BAA9 /* Views/ShareExport */,
+				C13534703E9645218EB007D9 /* Views/Sidebar */,
+				4E6BDB189EAE43AFB7BB57C6 /* Info.plist */,
+				1D57B89327CD40DF8507C45A /* RoweMacOS.entitlements */,
+			);
+			name = RoweMacOS;
+			sourceTree = "<group>";
+		};
+		88D73EEDC1054C0086FD81C2 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				E33752AABEC44A168D21C2F7 /* RoweApp.swift */,
+			);
+			name = "App";
+			sourceTree = "<group>";
+		};
+		7903244589904C0581E2D3E8 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				B21791ACF630432FB010BFA1 /* CraftWindowShell.swift */,
+				27EDB13446944D6EAEAFFB24 /* GlassComponents.swift */,
+				81A01F51B59C4949B4B58C12 /* ThemeTokens.swift */,
+			);
+			name = "DesignSystem";
+			sourceTree = "<group>";
+		};
+		7C6C52B7B8004749839EE225 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				573815A81E7A4B1CA5E46C2F /* HapticsManager.swift */,
+				6DFC18661B7A4A02961799F6 /* SoundManager.swift */,
+			);
+			name = "Services";
+			sourceTree = "<group>";
+		};
+		31897A36D0F44032B6FA154D /* Views/CalendarAndTasks */ = {
+			isa = PBXGroup;
+			children = (
+				9775D30DD1B7494D95C8AEB4 /* AllTasksView.swift */,
+				A87177C7C9A8447CB3F359B8 /* CalendarTasksView.swift */,
+				7D9E3B6C53F8470589D01BC1 /* TaskCheckboxControl.swift */,
+				6CC44B4F43E24D048C33FDAE /* TaskDateRepeatPicker.swift */,
+				C5A5A78346D34C3CA39AF2A4 /* TaskEditorPopover.swift */,
+			);
+			name = "Views/CalendarAndTasks";
+			sourceTree = "<group>";
+		};
+		E0989CBFAF844EEFA03BDC31 /* Views/Connections */ = {
+			isa = PBXGroup;
+			children = (
+				B6867CC82F33424E94B03FB8 /* ConnectionsView.swift */,
+			);
+			name = "Views/Connections";
+			sourceTree = "<group>";
+		};
+		77A9E318338B4DEFAAA88684 /* Views/Documents */ = {
+			isa = PBXGroup;
+			children = (
+				7C893D1464BD48B0B82E8662 /* AllDocsView.swift */,
+				0F10236896BE47439666430C /* SharedWithMeView.swift */,
+			);
+			name = "Views/Documents";
+			sourceTree = "<group>";
+		};
+		C7B0ECB41EF142AD9B123728 /* Views/Editor */ = {
+			isa = PBXGroup;
+			children = (
+				D2ACA80BFB344F418482197A /* BlockRowView.swift */,
+				6A73EB9E16BD443E8021875D /* DocumentEditorView.swift */,
+				B92FFD332BCF400BBB022B79 /* RightInspectorView.swift */,
+				8792DB593D3940B985F3B135 /* SlashMenuView.swift */,
+				7B19A044E3BF40A2BBB731F5 /* StyleGalleryModal.swift */,
+			);
+			name = "Views/Editor";
+			sourceTree = "<group>";
+		};
+		598F0D5DD71C422A878C10B3 /* Views/QuickOpen */ = {
+			isa = PBXGroup;
+			children = (
+				00EF73EB4CB749E9BD4DA6C3 /* QuickOpenPanel.swift */,
+			);
+			name = "Views/QuickOpen";
+			sourceTree = "<group>";
+		};
+		961978C9226C469CB3BC7598 /* Views/Settings */ = {
+			isa = PBXGroup;
+			children = (
+				77CFDCFE8A4A4C00AB5F5178 /* SettingsView.swift */,
+			);
+			name = "Views/Settings";
+			sourceTree = "<group>";
+		};
+		297E46417C884AD1B6F4BAA9 /* Views/ShareExport */ = {
+			isa = PBXGroup;
+			children = (
+				60E035C49E614A049A1DA6E5 /* SharePopoverView.swift */,
+			);
+			name = "Views/ShareExport";
+			sourceTree = "<group>";
+		};
+		C13534703E9645218EB007D9 /* Views/Sidebar */ = {
+			isa = PBXGroup;
+			children = (
+				4721DCFA7B83422BBEF7007A /* DocumentSidebarView.swift */,
+				220729399EFE40DB977D3C49 /* WorkspaceSidebarView.swift */,
+			);
+			name = "Views/Sidebar";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+/* Begin PBXNativeTarget section */
+		08630253D1B5426F8985E864 /* Rowe */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1409ACC50FA40D2BC37E9E9 /* Build configuration list for PBXNativeTarget "Rowe" */;
+			buildPhases = (
+				CE3DD0C68E664913A81331A1 /* Sources */,
+				0431780AE0184AC0891E4717 /* Frameworks */,
+				1C70E91BB4AF45AAA982B1BC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Rowe;
+			packageProductDependencies = (
+				C09F0DCA76AD4A99B907B9D7 /* RoweCore */,
+			);
+			productName = Rowe;
+			productReference = B204E458907B4CE7901C8675 /* Rowe.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+/* Begin PBXProject section */
+		E5899446E3C545BFBBCB7195 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 8BE2262FD9D545879DDB769C /* Build configuration list for PBXProject "Rowe" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 870C1A740CC5417E8C456E14;
+			packageReferences = (
+				6A6A06AAF34D490983E5455F /* XCLocalSwiftPackageReference "RoweCore" */,
+			);
+			productRefGroup = 6C7912788A3340A8A1C5C921 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				08630253D1B5426F8985E864 /* Rowe */,
+			);
+		};
+/* End PBXProject section */
+/* Begin PBXResourcesBuildPhase section */
+		1C70E91BB4AF45AAA982B1BC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+/* Begin PBXSourcesBuildPhase section */
+		CE3DD0C68E664913A81331A1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BE2F2226B81C4F2CA9300935 /* RoweApp.swift in Sources */,
+				43A8BBDA77F14E27880C87EE /* CraftWindowShell.swift in Sources */,
+				3C5E5EF109D94322AD36847B /* GlassComponents.swift in Sources */,
+				AA0148D5C20E4565B803E063 /* ThemeTokens.swift in Sources */,
+				AEADC4C98C704AE192F027F3 /* HapticsManager.swift in Sources */,
+				97C6FBC8F65E454A8A4AEEB1 /* SoundManager.swift in Sources */,
+				65ED781F7E4E46B19C9BE015 /* AllTasksView.swift in Sources */,
+				9C0FA7ACFD8A440D87422C4A /* CalendarTasksView.swift in Sources */,
+				438B9E3A7258484A93FE1EAF /* TaskCheckboxControl.swift in Sources */,
+				63D5E3A88DED4790B8CE2415 /* TaskDateRepeatPicker.swift in Sources */,
+				8F9B7436AB2446E4B97943E4 /* TaskEditorPopover.swift in Sources */,
+				F7E7D64EA1C94F7C95035CC4 /* ConnectionsView.swift in Sources */,
+				9E5B32C791AA45A68B4E33AC /* AllDocsView.swift in Sources */,
+				4BBB8FB91D794EE788970196 /* SharedWithMeView.swift in Sources */,
+				E8035357550E43E0A1F958EF /* BlockRowView.swift in Sources */,
+				A91F35E1307D47A6B52C94CC /* DocumentEditorView.swift in Sources */,
+				1C1D19DB1DBF47AAB263AA84 /* RightInspectorView.swift in Sources */,
+				0548726B39F5422FB2D09968 /* SlashMenuView.swift in Sources */,
+				C13AED83EDCE4A9E96FBAC40 /* StyleGalleryModal.swift in Sources */,
+				90FF1106C7334181B481AE14 /* QuickOpenPanel.swift in Sources */,
+				7941DF2A24E54E728D9555C3 /* SettingsView.swift in Sources */,
+				353079856B0A476C94E9C0DE /* SharePopoverView.swift in Sources */,
+				BE4588F99459435C950E6CE1 /* DocumentSidebarView.swift in Sources */,
+				4F58CD2CB2AA4068B2A07ADA /* WorkspaceSidebarView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+/* Begin XCBuildConfiguration section */
+		1012E4E2030E4FC78B8DB261 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		FB32FFE34F84476C9BE67884 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		AE06EA133675451C8288DE5C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "RoweMacOS/App/RoweMacOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "RoweMacOS/App/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rowe.macos";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		AECC37107B224C3D9334532D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "RoweMacOS/App/RoweMacOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "RoweMacOS/App/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.rowe.macos";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+/* Begin XCConfigurationList section */
+		8BE2262FD9D545879DDB769C /* Build configuration list for PBXProject "Rowe" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1012E4E2030E4FC78B8DB261 /* Debug */,
+				FB32FFE34F84476C9BE67884 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C1409ACC50FA40D2BC37E9E9 /* Build configuration list for PBXNativeTarget "Rowe" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AE06EA133675451C8288DE5C /* Debug */,
+				AECC37107B224C3D9334532D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+/* Begin XCLocalSwiftPackageReference section */
+		6A6A06AAF34D490983E5455F /* XCLocalSwiftPackageReference "RoweCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = RoweCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+/* Begin XCSwiftPackageProductDependency section */
+		C09F0DCA76AD4A99B907B9D7 /* RoweCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6A6A06AAF34D490983E5455F /* XCLocalSwiftPackageReference "RoweCore" */;
+			productName = RoweCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = E5899446E3C545BFBBCB7195 /* Project object */;
+}

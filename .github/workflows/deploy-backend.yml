@@ -1,0 +1,72 @@
+name: Deploy Backend
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rowe-backend-production
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: RoweServer/go.mod
+
+      - name: Run RoweServer tests
+        working-directory: RoweServer
+        run: go test -v ./...
+
+      - name: Configure SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_DEPLOY_KEY }}
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+        run: |
+          test -n "$DEPLOY_KEY"
+          test -n "$PRODUCTION_HOST"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy-key"
+          ssh-keyscan -H "$PRODUCTION_HOST" > "$RUNNER_TEMP/known-hosts" 2>/dev/null
+
+      - name: Deploy RoweServer to production
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+        run: |
+          tar -C RoweServer -czf "$RUNNER_TEMP/rowe-server.tar.gz" \
+            cmd internal go.mod Dockerfile docker-compose.yml .env.example
+          ssh -i "$RUNNER_TEMP/deploy-key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+            "${PRODUCTION_USER}@${PRODUCTION_HOST}" 'bash -s' \
+            < <(cat scripts/deploy-server.sh; echo ""; exit 0) || true
+          # Stream deploy-server.sh with tarball separately so stdin carries the tar stream
+          scp -i "$RUNNER_TEMP/deploy-key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
+            scripts/deploy-server.sh "${PRODUCTION_USER}@${PRODUCTION_HOST}:/tmp/rowe-deploy-server.sh"
+          ssh -i "$RUNNER_TEMP/deploy-key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
+            "${PRODUCTION_USER}@${PRODUCTION_HOST}" \
+            "bash /tmp/rowe-deploy-server.sh && rm -f /tmp/rowe-deploy-server.sh" \
+            < "$RUNNER_TEMP/rowe-server.tar.gz"
+          curl -fsS https://rowe.traverses.dpdns.org/healthz
+
+      - name: Clean up SSH credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy-key" "$RUNNER_TEMP/known-hosts"

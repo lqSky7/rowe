@@ -1,0 +1,104 @@
+name: Release iOS IPA (FlareStore)
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Release notes (default "Version X.Y.Z.")'
+        required: false
+      runner:
+        description: "Runner label (macos-latest or xcode-27)"
+        required: false
+        default: "macos-latest"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-ios
+  cancel-in-progress: false
+
+jobs:
+  release-ios:
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: v
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" RoweApp/RoweIOS/Info.plist)
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" RoweApp/RoweIOS/Info.plist)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "tag=ios-v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release notes
+        env:
+          INPUT_NOTES: ${{ inputs.notes }}
+        run: |
+          NOTES="${INPUT_NOTES:-Version ${{ steps.v.outputs.version }}.}"
+          printf '%s\n' "$NOTES" > "$RUNNER_TEMP/notes.txt"
+
+      - name: Refuse to overwrite an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::Release ${{ steps.v.outputs.tag }} already exists"
+            exit 1
+          fi
+
+      - name: Ensure XcodeGen is installed
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Build unsigned IPA
+        run: |
+          chmod +x scripts/build-ipa.sh
+          ./scripts/build-ipa.sh release
+
+      - name: Name the asset
+        id: ipa
+        run: |
+          V=${{ steps.v.outputs.version }}
+          mv "Rowe-$V-unsigned.ipa" "Rowe-$V.ipa"
+          echo "path=Rowe-$V.ipa" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -f%z "Rowe-$V.ipa")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.v.outputs.tag }}" "${{ steps.ipa.outputs.path }}" \
+            --target "${{ github.sha }}" \
+            --title "Rowe iOS ${{ steps.v.outputs.version }}" \
+            --notes-file "$RUNNER_TEMP/notes.txt"
+
+      - name: Update altstore/apps.json for FlareStore
+        run: |
+          git fetch origin main
+          git checkout -B main origin/main
+          V=${{ steps.v.outputs.version }}
+          B=${{ steps.v.outputs.build }}
+          TAG=${{ steps.v.outputs.tag }}
+          jq --arg v "$V" --arg b "$B" \
+             --arg d "$(date -u +%Y-%m-%d)" --rawfile notes "$RUNNER_TEMP/notes.txt" \
+             --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/Rowe-$V.ipa" \
+             --argjson size "${{ steps.ipa.outputs.size }}" '
+            .apps[0].versions |= ([{
+              version: $v, buildVersion: $b, date: $d,
+              localizedDescription: ($notes | rtrimstr("\n")),
+              downloadURL: $url, size: $size, minOSVersion: "18.0"
+            }] + map(select(.version != $v)))' \
+            altstore/apps.json > altstore/apps.json.new
+          mv altstore/apps.json.new altstore/apps.json
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(altstore): add $TAG"
+          git push origin main
