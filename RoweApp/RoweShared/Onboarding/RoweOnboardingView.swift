@@ -46,7 +46,8 @@ private struct OnboardingSlide: Identifiable {
     let palette: GlassGlowPalette
 }
 
-/// Consistent, Metal-powered GlassGlow onboarding experience shared across iOS and macOS.
+/// Consistent, Metal-powered GlassGlow onboarding experience shared across iOS and macOS,
+/// with an integrated, flagship Sign In / Create Account step built directly into the flow.
 public struct RoweOnboardingView: View {
     @Bindable var store: WorkspaceStore
     var onSignInRequested: () -> Void
@@ -54,23 +55,28 @@ public struct RoweOnboardingView: View {
 
     @State private var step: Int = 0
     @State private var appeared = false
+    @State private var isRegisterMode = false
+    @State private var displayName: String = ""
+    @State private var email: String = ""
+    @State private var password: String = ""
+    @Namespace private var modePillNS
 
-    private static let monochromePalette = GlassGlowPalette(
+    public static let monochromePalette = GlassGlowPalette(
         Color(white: 0.96),
         Color(white: 0.56),
         Color(white: 0.22)
     )
-    private static let paleGreyPeachPalette = GlassGlowPalette(
+    public static let paleGreyPeachPalette = GlassGlowPalette(
         Color(red: 0.95, green: 0.84, blue: 0.78),
         Color(red: 0.85, green: 0.82, blue: 0.81),
         Color(red: 0.97, green: 0.89, blue: 0.84)
     )
-    private static let paleGreySkyBluePalette = GlassGlowPalette(
+    public static let paleGreySkyBluePalette = GlassGlowPalette(
         Color(red: 0.76, green: 0.86, blue: 0.96),
         Color(red: 0.82, green: 0.85, blue: 0.89),
         Color(red: 0.70, green: 0.82, blue: 0.94)
     )
-    private static let paleSageMistPalette = GlassGlowPalette(
+    public static let paleSageMistPalette = GlassGlowPalette(
         Color(red: 0.82, green: 0.90, blue: 0.86),
         Color(red: 0.85, green: 0.85, blue: 0.90),
         Color(red: 0.88, green: 0.91, blue: 0.94)
@@ -105,15 +111,15 @@ public struct RoweOnboardingView: View {
             id: 3,
             eyebrow: "STEP 4 OF 4",
             title: "Your Space, Everywhere",
-            subtitle: "Sign in to sync your documents and PIN-locked vault across Mac and iPhone, or start completely offline right now.",
-            symbol: "icloud.and.arrow.up.fill",
+            subtitle: "Sync documents, profile, and your PIN-locked vault across Mac and iPhone.",
+            symbol: nil,
             palette: RoweOnboardingView.paleSageMistPalette
         )
     ]
 
     public init(
         store: WorkspaceStore,
-        onSignInRequested: @escaping () -> Void,
+        onSignInRequested: @escaping () -> Void = {},
         onFinish: @escaping () -> Void
     ) {
         self.store = store
@@ -122,15 +128,16 @@ public struct RoweOnboardingView: View {
     }
 
     private var currentSlide: OnboardingSlide { slides[step] }
+    private var isAuthStep: Bool { step == slides.count - 1 }
 
     public var body: some View {
         ZStack {
-            // Deep subtle atmospheric backdrop so the Metal GlassGlow halo shines crisply
+            // Deep atmospheric obsidian canvas so the Metal GlassGlow halo breathes cleanly
             LinearGradient(
                 colors: [
-                    Color(red: 0.05, green: 0.055, blue: 0.075),
-                    Color(red: 0.08, green: 0.085, blue: 0.115),
-                    Color(red: 0.04, green: 0.045, blue: 0.06)
+                    Color(red: 0.045, green: 0.05, blue: 0.068),
+                    Color(red: 0.075, green: 0.08, blue: 0.105),
+                    Color(red: 0.035, green: 0.04, blue: 0.055)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -138,79 +145,62 @@ public struct RoweOnboardingView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Top bar: step counter + Skip
+                // Top bar: back button (on auth step), step counter, and Skip
                 HStack {
+                    if step > 0 {
+                        Button {
+                            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
+                                step -= 1
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("Back")
+                                    .font(.system(size: 12.5, weight: .medium))
+                            }
+                            .foregroundStyle(.white.opacity(0.65))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer()
+
                     Text(currentSlide.eyebrow)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .tracking(1.1)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .tracking(1.2)
+                        .foregroundStyle(.white.opacity(0.5))
                         .contentTransition(.numericText())
 
                     Spacer()
 
-                    if step < slides.count - 1 {
-                        Button("Skip") {
-                            completeOnboarding(openLogin: false)
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.65))
+                    Button(isAuthStep ? "Offline" : "Skip") {
+                        finishOnboarding()
                     }
-                }
-                .padding(.horizontal, 26)
-                .padding(.top, 22)
-
-                Spacer(minLength: 16)
-
-                // Hero GlassGlow Metal artwork
-                ZStack {
-                    if let symbol = currentSlide.symbol {
-                        Image(systemName: symbol)
-                            .font(.system(size: 92, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 140, height: 140)
-                            .glassGlow(currentSlide.palette, speed: 0.8, glow: 1.15)
-                            .id("sym-\(step)")
-                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    } else {
-                        RoweRibbonMark()
-                            .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
-                            .foregroundStyle(.white)
-                            .frame(width: 156, height: 118)
-                            .glassGlow(currentSlide.palette, speed: 0.75, glow: 1.2)
-                            .id("mark-\(step)")
-                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    }
-                }
-                .frame(height: 190)
-                .animation(.spring(response: 0.44, dampingFraction: 0.78), value: step)
-
-                // Title & subtitle with numericText smooth morphing
-                VStack(spacing: 12) {
-                    Text(currentSlide.title)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                        .contentTransition(.numericText())
-
-                    Text(currentSlide.subtitle)
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.72))
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(3)
-                        .frame(maxWidth: 380)
-                        .contentTransition(.numericText())
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.65))
                 }
                 .padding(.horizontal, 28)
-                .animation(.spring(response: 0.38, dampingFraction: 0.82), value: step)
+                .padding(.top, 22)
 
-                Spacer(minLength: 24)
+                Spacer(minLength: 10)
+
+                if isAuthStep {
+                    integratedAuthSlide
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                } else {
+                    introSlideContent
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+
+                Spacer(minLength: 14)
 
                 // Page progress dots
                 HStack(spacing: 8) {
                     ForEach(slides) { s in
                         Capsule()
-                            .fill(step == s.id ? Color.white : Color.white.opacity(0.25))
+                            .fill(step == s.id ? Color.white : Color.white.opacity(0.24))
                             .frame(width: step == s.id ? 24 : 7, height: 7)
                             .onTapGesture {
                                 withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
@@ -220,86 +210,41 @@ public struct RoweOnboardingView: View {
                     }
                 }
                 .animation(.spring(response: 0.34, dampingFraction: 0.8), value: step)
-                .padding(.bottom, 24)
+                .padding(.bottom, 22)
 
-                // Bottom action buttons
-                if step < slides.count - 1 {
-                    HStack(spacing: 12) {
-                        if step > 0 {
-                            Button {
-                                withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                                    step -= 1
-                                }
-                            } label: {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 48, height: 48)
-                                    .background(Circle().fill(Color.white.opacity(0.10)))
-                            }
-                            .buttonStyle(.plain)
+                if !isAuthStep {
+                    Button {
+                        withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+                            step += 1
                         }
-
-                        Button {
-                            withAnimation(.spring(response: 0.36, dampingFraction: 0.82)) {
-                                step += 1
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text("Continue")
-                                    .font(.system(size: 15.5, weight: .semibold))
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(Capsule().fill(Color.white))
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Continue")
+                                .font(.system(size: 15.5, weight: .semibold))
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 14, weight: .semibold))
                         }
-                        .buttonStyle(.plain)
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(Capsule().fill(Color.white))
                     }
-                    .frame(maxWidth: 340)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 28)
-                } else {
-                    VStack(spacing: 10) {
-                        Button {
-                            completeOnboarding(openLogin: true)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.system(size: 14))
-                                Text("Sign In or Create Account")
-                                    .font(.system(size: 15.5, weight: .semibold))
-                            }
-                            .foregroundStyle(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(Capsule().fill(Color.white))
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            completeOnboarding(openLogin: false)
-                        } label: {
-                            Text("Start Writing Locally")
-                                .font(.system(size: 14.5, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                                .background(Capsule().fill(Color.white.opacity(0.11)))
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    .buttonStyle(.plain)
                     .frame(maxWidth: 340)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 28)
                 }
             }
+            .animation(.spring(response: 0.42, dampingFraction: 0.84), value: step)
             .opacity(appeared ? 1 : 0)
             .scaleEffect(appeared ? 1 : 0.96)
             .blur(radius: appeared ? 0 : 8)
             .onAppear {
+                if displayName.isEmpty && store.space.authorName != "Owner" {
+                    displayName = store.space.authorName
+                }
+                if email.isEmpty { email = store.space.email }
+                store.authErrorMessage = nil
                 withAnimation(.spring(response: 0.52, dampingFraction: 0.84)) {
                     appeared = true
                 }
@@ -307,11 +252,253 @@ public struct RoweOnboardingView: View {
         }
     }
 
-    private func completeOnboarding(openLogin: Bool) {
+    // MARK: - Intro Slides (Steps 1–3)
+
+    private var introSlideContent: some View {
+        VStack(spacing: 22) {
+            ZStack {
+                if let symbol = currentSlide.symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 92, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 140, height: 140)
+                        .glassGlow(currentSlide.palette, speed: 0.78, glow: 1.15)
+                        .id("sym-\(step)")
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                } else {
+                    RoweRibbonMark()
+                        .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
+                        .foregroundStyle(.white)
+                        .frame(width: 156, height: 118)
+                        .glassGlow(currentSlide.palette, speed: 0.72, glow: 1.2)
+                        .id("mark-\(step)")
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
+            }
+            .frame(height: 185)
+
+            VStack(spacing: 12) {
+                Text(currentSlide.title)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .contentTransition(.numericText())
+
+                Text(currentSlide.subtitle)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .frame(maxWidth: 380)
+                    .contentTransition(.numericText())
+            }
+            .padding(.horizontal, 28)
+        }
+    }
+
+    // MARK: - Integrated Flagship Sign In / Create Account Step (Step 4)
+
+    private var integratedAuthSlide: some View {
+        VStack(spacing: 18) {
+            RoweRibbonMark()
+                .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
+                .foregroundStyle(.white)
+                .frame(width: 96, height: 72)
+                .glassGlow(Self.paleSageMistPalette, speed: 0.72, glow: 1.05)
+
+            VStack(spacing: 6) {
+                Text(isRegisterMode ? "Create your Rowe account" : "Sign in to Rowe")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText())
+
+                Text("Sync documents and zero-knowledge locked notes across your devices.")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.white.opacity(0.64))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 340)
+            }
+
+            // Frosted Glass Mode Pill
+            HStack(spacing: 4) {
+                authModeTab("Sign In", active: !isRegisterMode) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        isRegisterMode = false
+                        store.authErrorMessage = nil
+                    }
+                }
+                authModeTab("Create Account", active: isRegisterMode) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        isRegisterMode = true
+                        store.authErrorMessage = nil
+                    }
+                }
+            }
+            .padding(4)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75))
+            )
+            .frame(maxWidth: 340)
+
+            // Sleek Frosted Glass Inputs (No Server URL clutter)
+            VStack(spacing: 10) {
+                if isRegisterMode {
+                    authFieldRow(icon: "person", placeholder: "Your name") {
+                        TextField("", text: $displayName, prompt: Text("Your name").foregroundStyle(.white.opacity(0.38)))
+                            .textFieldStyle(.plain)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                authFieldRow(icon: "envelope", placeholder: "Email address") {
+                    #if os(iOS)
+                    TextField("", text: $email, prompt: Text("Email address").foregroundStyle(.white.opacity(0.38)))
+                        .textFieldStyle(.plain)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                        .autocorrectionDisabled()
+                    #else
+                    TextField("", text: $email, prompt: Text("Email address").foregroundStyle(.white.opacity(0.38)))
+                        .textFieldStyle(.plain)
+                    #endif
+                }
+
+                authFieldRow(icon: "lock", placeholder: isRegisterMode ? "Create password (8+ chars)" : "Password") {
+                    SecureField(
+                        "",
+                        text: $password,
+                        prompt: Text(isRegisterMode ? "Create password (8+ chars)" : "Password").foregroundStyle(.white.opacity(0.38))
+                    )
+                    .textFieldStyle(.plain)
+                    .onSubmit { submitAuth() }
+                }
+            }
+            .frame(maxWidth: 340)
+            .animation(.spring(response: 0.32, dampingFraction: 0.84), value: isRegisterMode)
+
+            if let err = store.authErrorMessage, !err.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11.5))
+                    Text(err)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(Color(red: 1.0, green: 0.56, blue: 0.54))
+                .frame(maxWidth: 340, alignment: .leading)
+                .transition(.opacity)
+            }
+
+            VStack(spacing: 10) {
+                Button {
+                    submitAuth()
+                } label: {
+                    HStack(spacing: 8) {
+                        if store.isAuthBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.black)
+                        }
+                        Text(isRegisterMode ? "Create Account & Start" : "Sign In & Continue")
+                            .font(.system(size: 15, weight: .semibold))
+                            .contentTransition(.numericText())
+                    }
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(Capsule().fill(Color.white.opacity(canSubmitAuth ? 1.0 : 0.45)))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSubmitAuth || store.isAuthBusy)
+
+                Button {
+                    finishOnboarding()
+                } label: {
+                    Text("Continue Offline — Start Writing Locally")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: 340)
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private var canSubmitAuth: Bool {
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && password.count >= 8
+    }
+
+    private func authModeTab(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: active ? .semibold : .medium))
+                .foregroundStyle(active ? .white : .white.opacity(0.55))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background {
+                    if active {
+                        Capsule()
+                            .fill(Color.white.opacity(0.16))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
+                            .matchedGeometryEffect(id: "onboardingAuthPill", in: modePillNS)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func authFieldRow<Content: View>(icon: String, placeholder: String, @ViewBuilder field: () -> Content) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.52))
+                .frame(width: 18)
+            field()
+                .font(.system(size: 14))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75)
+                )
+        )
+    }
+
+    private func submitAuth() {
+        guard canSubmitAuth, !store.isAuthBusy else { return }
+        Task {
+            if isRegisterMode {
+                await store.registerAccount(
+                    serverURL: store.serverURL,
+                    email: email,
+                    password: password,
+                    displayName: displayName
+                )
+            } else {
+                await store.signIn(
+                    serverURL: store.serverURL,
+                    email: email,
+                    password: password
+                )
+            }
+            if store.isSignedIn {
+                finishOnboarding()
+            }
+        }
+    }
+
+    private func finishOnboarding() {
         store.updateSettings { $0.hasCompletedOnboarding = true }
         onFinish()
-        if openLogin {
-            onSignInRequested()
-        }
     }
 }

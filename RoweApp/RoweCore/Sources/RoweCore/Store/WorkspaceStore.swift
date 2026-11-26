@@ -1372,8 +1372,28 @@ public final class WorkspaceStore {
     }
 
     public func updateAvatarImageBase64(_ base64: String?) {
+        if let base64, let data = Data(base64Encoded: base64), data.count > 5 * 1024 * 1024 {
+            lastSyncStatusMessage = "Profile picture exceeds 5 MB limit"
+            return
+        }
         space.avatarImageBase64 = base64
         schedulePersistence()
+        if authSession != nil {
+            Task {
+                do {
+                    let updatedUser = try await withAuthorizedSession { sess in
+                        if let base64, !base64.isEmpty {
+                            return try await self.backendClient.updateAvatar(serverURL: sess.serverURL, accessToken: sess.accessToken, avatarBase64: base64)
+                        } else {
+                            return try await self.backendClient.deleteAvatar(serverURL: sess.serverURL, accessToken: sess.accessToken)
+                        }
+                    }
+                    self.authSession?.user = updatedUser
+                } catch {
+                    self.lastSyncStatusMessage = "Avatar sync error: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     // MARK: - Multithreaded Contextual Search, Export, Formulas, Sync
@@ -1590,6 +1610,11 @@ public final class WorkspaceStore {
             self.authSession = AuthSession(serverURL: normalizedURL, accessToken: resp.accessToken, refreshToken: resp.refreshToken, user: resp.user)
             self.space.authorName = resp.user.displayName
             self.space.email = resp.user.email
+            if let remoteAvatar = resp.user.avatarBase64, !remoteAvatar.isEmpty {
+                self.space.avatarImageBase64 = remoteAvatar
+            } else if let localAvatar = self.space.avatarImageBase64, !localAvatar.isEmpty {
+                _ = try? await backendClient.updateAvatar(serverURL: normalizedURL, accessToken: resp.accessToken, avatarBase64: localAvatar)
+            }
             if let remoteVault = resp.vault {
                 self.vaultEnvelope = remoteVault
             } else if let localVault = self.vaultEnvelope {
@@ -1614,6 +1639,11 @@ public final class WorkspaceStore {
             self.authSession = AuthSession(serverURL: normalizedURL, accessToken: resp.accessToken, refreshToken: resp.refreshToken, user: resp.user)
             self.space.authorName = resp.user.displayName
             self.space.email = resp.user.email
+            if let remoteAvatar = resp.user.avatarBase64, !remoteAvatar.isEmpty {
+                self.space.avatarImageBase64 = remoteAvatar
+            } else if let localAvatar = self.space.avatarImageBase64, !localAvatar.isEmpty {
+                _ = try? await backendClient.updateAvatar(serverURL: normalizedURL, accessToken: resp.accessToken, avatarBase64: localAvatar)
+            }
             if let remoteVault = resp.vault {
                 self.vaultEnvelope = remoteVault
             } else if let localVault = self.vaultEnvelope {
@@ -1659,6 +1689,9 @@ public final class WorkspaceStore {
             }
             self.space.authorName = profile.user.displayName
             self.space.email = profile.user.email
+            if let remoteAvatar = profile.user.avatarBase64, !remoteAvatar.isEmpty {
+                self.space.avatarImageBase64 = remoteAvatar
+            }
             if let remoteVault = profile.vault {
                 self.vaultEnvelope = remoteVault
             }

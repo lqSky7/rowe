@@ -170,7 +170,7 @@ struct IOSDocumentEditorView: View {
     private var topEditorBar: some View {
         HStack(spacing: 10) {
             if isBlockSelectionMode {
-                IOSGlassPillButton("Done", systemImage: "checkmark") {
+                IOSGlassPillButton(title: "Done", systemImage: "checkmark") {
                     exitBlockSelection()
                 }
                 Text("\(store.selectedBlockIds.count) selected")
@@ -749,15 +749,7 @@ struct IOSDocumentEditorView: View {
                 .font(.system(size: 74, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 110, height: 110)
-                .glassGlow(
-                    GlassGlowPalette(
-                        primary: Color(red: 0.72, green: 0.80, blue: 0.88),
-                        secondary: Color(red: 0.60, green: 0.69, blue: 0.79),
-                        accent: Color(red: 0.82, green: 0.86, blue: 0.90)
-                    ),
-                    speed: 0.75,
-                    glow: 1.0
-                )
+                .glassGlow(RoweOnboardingView.paleGreySkyBluePalette, speed: 0.75, glow: 1.0)
 
             Text(document.displayTitle)
                 .font(.system(size: 22, weight: .bold))
@@ -769,7 +761,7 @@ struct IOSDocumentEditorView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 36)
 
-            IOSGlassPillButton("Enter PIN to Unlock", systemImage: "key.fill") {
+            IOSGlassPillButton(title: "Enter PIN to Unlock", systemImage: "key.fill") {
                 store.pinPromptRequest = .unlockDocument(docId: document.id)
             }
             .padding(.top, 6)

@@ -15,7 +15,16 @@ struct DocumentEditorView: View {
     @State private var blockFrames: [String: CGRect] = [:]
     @State private var isSharePopoverOpen = false
     @State private var blockKeyMonitor: Any?
+    @State private var blockMarqueeStart: CGPoint? = nil
+    @State private var blockMarqueeCurrent: CGPoint? = nil
     @FocusState private var isTitleFocused: Bool
+
+    private var blockMarqueeRect: CGRect? {
+        guard let s = blockMarqueeStart, let c = blockMarqueeCurrent else { return nil }
+        let w = abs(c.x - s.x), h = abs(c.y - s.y)
+        guard w > 6 || h > 6 else { return nil }
+        return CGRect(x: min(s.x, c.x), y: min(s.y, c.y), width: w, height: h)
+    }
 
     private var visibleBlocks: [Block] {
         store.visibleBlocks(in: document.id)
@@ -199,9 +208,50 @@ struct DocumentEditorView: View {
                             }
                         }
                         .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 12, coordinateSpace: .named("editorCanvas"))
+                                .onChanged { value in
+                                    let startBlock = blockFrames.first(where: { $0.value.contains(value.startLocation) })?.key
+                                    let currentBlock = blockFrames.first(where: { $0.value.contains(value.location) })?.key
+                                    let crossedBlocks = (startBlock == nil) || (currentBlock != nil && currentBlock != startBlock)
+                                    if blockMarqueeStart == nil && crossedBlocks {
+                                        NSApp.keyWindow?.makeFirstResponder(nil)
+                                        blockMarqueeStart = value.startLocation
+                                    }
+                                    if blockMarqueeStart != nil {
+                                        blockMarqueeCurrent = value.location
+                                        if let marquee = blockMarqueeRect {
+                                            let hitIds = Set(blockFrames.compactMap { id, rect in
+                                                rect.intersects(marquee) ? id : nil
+                                            })
+                                            if !hitIds.isEmpty {
+                                                store.selectedBlockIds = hitIds
+                                                store.activeBlockId = visibleBlocks.first(where: { hitIds.contains($0.id) })?.id
+                                                store.editorSelectionMode = .blockSelection
+                                            }
+                                        }
+                                    }
+                                }
+                                .onEnded { _ in
+                                    blockMarqueeStart = nil
+                                    blockMarqueeCurrent = nil
+                                }
+                        )
                         }
                     }
                     .animation(CraftTheme.craftSpring(reduceMotion: reduceMotion), value: store.isDocumentUnlocked(document.id))
+
+                    if let marquee = blockMarqueeRect {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.14))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Color.accentColor.opacity(0.65), lineWidth: 1.1)
+                            )
+                            .frame(width: marquee.width, height: marquee.height)
+                            .offset(x: marquee.minX, y: marquee.minY)
+                            .allowsHitTesting(false)
+                    }
 
                     // Bottom floating navigation pill (expands into a large interactive Liquid Glass bar when blocks are selected)
                     VStack {
@@ -766,6 +816,9 @@ struct DocumentEditorView: View {
 
     private func applySlashAction(_ action: SlashAction) {
         let targetId = slashTargetBlockId ?? store.activeBlockId ?? visibleBlocks.last?.id
+        let targetIds: Set<String> = store.selectedBlockIds.isEmpty
+            ? (targetId.map { [$0] } ?? [])
+            : store.selectedBlockIds
 
         if let targetId {
             store.updateBlock(in: document.id, blockId: targetId) { blk in
@@ -779,37 +832,39 @@ struct DocumentEditorView: View {
             }
         }
 
+        func mutateTargets(_ fn: (inout Block) -> Void) {
+            guard !targetIds.isEmpty else { return }
+            store.mutateBlocks(in: document.id) { blocks in
+                for i in blocks.indices where targetIds.contains(blocks[i].id) {
+                    fn(&blocks[i])
+                }
+            }
+        }
+
         withAnimation(CraftTheme.microSpring(reduceMotion: reduceMotion)) {
             switch action {
             case .setList(let style):
-                guard let targetId else { return }
-                store.updateBlock(in: document.id, blockId: targetId) { blk in
+                mutateTargets { blk in
                     blk.listStyle = style
                     if style == .todo && blk.task == nil { blk.task = TaskMetadata() }
                 }
             case .setTextStyle(let style):
-                guard let targetId else { return }
-                store.updateBlock(in: document.id, blockId: targetId) { $0.textStyle = style }
+                mutateTargets { $0.textStyle = style }
             case .setDecoration(let dec):
-                guard let targetId else { return }
-                store.updateBlock(in: document.id, blockId: targetId) { $0.decoration = dec }
+                mutateTargets { $0.decoration = dec }
             case .setColor(let color):
                 store.applyColorToSelectionOrBlocks(in: document.id, color: color)
             case .indent(let delta):
-                guard let targetId else { return }
-                store.indentBlocks(in: document.id, blockIds: [targetId], delta: delta)
+                store.indentBlocks(in: document.id, blockIds: targetIds, delta: delta)
             case .setAlignment(let align):
-                guard let targetId else { return }
-                store.updateBlock(in: document.id, blockId: targetId) { $0.alignment = align }
+                mutateTargets { $0.alignment = align }
             case .setFont(let family):
-                guard let targetId else { return }
-                store.updateBlock(in: document.id, blockId: targetId) { $0.fontOverride = family }
+                mutateTargets { $0.fontOverride = family }
             case .insertDate(let text):
                 guard let targetId else { return }
                 store.updateBlock(in: document.id, blockId: targetId) { $0.content += ($0.content.isEmpty ? "" : " ") + text }
             case .setReminder(let offset):
-                guard let targetId else { return }
-                store.updateBlock(in: document.id, blockId: targetId) { blk in
+                mutateTargets { blk in
                     blk.listStyle = .todo
                     var meta = blk.task ?? TaskMetadata()
                     meta.reminderDate = Date().addingTimeInterval(offset)
@@ -820,7 +875,7 @@ struct DocumentEditorView: View {
                 let tableBlock = Block(documentId: document.id, kind: .table, content: "", tableData: TableData(rows: rows, columns: cols))
                 _ = store.insertStructuredBlock(in: document.id, after: targetId, block: tableBlock, focusTrailingBody: false)
             case .insertCodeBlock:
-                let codeBlock = Block(documentId: document.id, kind: .code, content: "", codeLanguage: "swift")
+                let codeBlock = Block(documentId: document.id, kind: .code, content: "", codeLanguage: "auto")
                 _ = store.insertStructuredBlock(in: document.id, after: targetId, block: codeBlock, focusTrailingBody: false)
             case .insertSeparator(let style):
                 store.insertOrUpdateSeparator(in: document.id, after: targetId, style: style)
@@ -841,8 +896,7 @@ struct DocumentEditorView: View {
             case .openStyleGallery:
                 store.isStyleGalleryPresented = true
             case .clearFormat:
-                guard let targetId else { return }
-                store.updateBlock(in: document.id, blockId: targetId) { blk in
+                mutateTargets { blk in
                     blk.textStyle = .body
                     blk.listStyle = .none
                     blk.decoration = .none
@@ -855,12 +909,10 @@ struct DocumentEditorView: View {
                     blk.runs = []
                 }
             case .duplicateBlock:
-                if let targetId { store.duplicateBlock(in: document.id, blockId: targetId) }
+                store.duplicateBlocks(in: document.id, blockIds: targetIds)
             case .deleteBlock:
-                if let targetId {
-                    HapticsManager.shared.destructive()
-                    store.deleteBlock(in: document.id, blockId: targetId)
-                }
+                HapticsManager.shared.destructive()
+                store.deleteBlocks(in: document.id, blockIds: targetIds)
             }
         }
     }

@@ -1,80 +1,112 @@
 import SwiftUI
 import RoweCore
 
+/// Flagship Liquid Glass + GlassGlow Sign In sheet for iOS (no Server URL clutter).
 struct IOSLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: WorkspaceStore
 
     @State private var isRegisterMode = false
-    @State private var serverURL: String = ""
     @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var password: String = ""
+    @Namespace private var modePillNS
+
+    private var canSubmit: Bool {
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && password.count >= 8
+    }
 
     var body: some View {
-        NavigationStack {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.045, green: 0.05, blue: 0.068),
+                    Color(red: 0.075, green: 0.08, blue: 0.105),
+                    Color(red: 0.035, green: 0.04, blue: 0.055)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
             ScrollView {
                 VStack(spacing: 20) {
+                    HStack {
+                        Spacer()
+                        Button("Offline") {
+                            IOSKeyboard.dismiss()
+                            dismiss()
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.65))
+                    }
+
                     RoweRibbonMark()
-                        .stroke(style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
+                        .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
                         .foregroundStyle(.white)
                         .frame(width: 96, height: 72)
-                        .glassGlow(
-                            GlassGlowPalette(
-                                primary: Color(white: 0.96),
-                                secondary: Color(white: 0.56),
-                                accent: Color(white: 0.22)
-                            ),
-                            speed: 0.75,
-                            glow: 0.95
-                        )
-                        .padding(.top, 10)
+                        .glassGlow(RoweOnboardingView.monochromePalette, speed: 0.72, glow: 1.0)
+                        .padding(.top, 4)
 
-                    VStack(spacing: 4) {
-                        Text(isRegisterMode ? "Create Rowe Account" : "Sign In to Rowe")
-                            .font(.system(size: 22, weight: .bold))
+                    VStack(spacing: 6) {
+                        Text(isRegisterMode ? "Create your Rowe account" : "Sign in to Rowe")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
                             .contentTransition(.numericText())
-                        Text("Sync documents & zero-knowledge locked notes.")
+                        Text("Sync documents, profile, and zero-knowledge locked notes.")
                             .font(.system(size: 13.5))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.64))
+                            .multilineTextAlignment(.center)
                     }
 
-                    Picker("Mode", selection: $isRegisterMode) {
-                        Text("Sign In").tag(false)
-                        Text("Create Account").tag(true)
+                    HStack(spacing: 4) {
+                        modeTab("Sign In", active: !isRegisterMode) {
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                                isRegisterMode = false
+                                store.authErrorMessage = nil
+                            }
+                        }
+                        modeTab("Create Account", active: isRegisterMode) {
+                            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                                isRegisterMode = true
+                                store.authErrorMessage = nil
+                            }
+                        }
                     }
-                    .pickerStyle(.segmented)
+                    .padding(4)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.08))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.75))
+                    )
 
                     VStack(spacing: 12) {
-                        inputBox("Server URL") {
-                            TextField("https://rowe.traverses.dpdns.org", text: $serverURL)
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.URL)
-                                .autocorrectionDisabled()
-                        }
-
                         if isRegisterMode {
-                            inputBox("Display Name") {
-                                TextField("Your name", text: $displayName)
+                            fieldRow(icon: "person") {
+                                TextField("", text: $displayName, prompt: Text("Your name").foregroundStyle(.white.opacity(0.38)))
                             }
                         }
 
-                        inputBox("Email") {
-                            TextField("you@example.com", text: $email)
+                        fieldRow(icon: "envelope") {
+                            TextField("", text: $email, prompt: Text("Email address").foregroundStyle(.white.opacity(0.38)))
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.emailAddress)
                                 .autocorrectionDisabled()
                         }
 
-                        inputBox("Password") {
-                            SecureField(isRegisterMode ? "At least 8 characters" : "Password", text: $password)
+                        fieldRow(icon: "lock") {
+                            SecureField(
+                                "",
+                                text: $password,
+                                prompt: Text(isRegisterMode ? "Create password (8+ chars)" : "Password").foregroundStyle(.white.opacity(0.38))
+                            )
                         }
                     }
 
                     if let err = store.authErrorMessage, !err.isEmpty {
                         Text(err)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Color(red: 1.0, green: 0.56, blue: 0.54))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
@@ -89,37 +121,64 @@ struct IOSLoginSheet: View {
                         .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
-                        .background(Capsule().fill(Color.accentColor))
+                        .background(Capsule().fill(Color.white.opacity(canSubmit ? 1.0 : 0.45)))
                     }
                     .buttonStyle(RowePressScaleStyle())
-                    .disabled(store.isAuthBusy || email.isEmpty || password.count < 8)
+                    .disabled(!canSubmit || store.isAuthBusy)
                 }
-                .padding(22)
+                .padding(24)
             }
             .scrollDismissesKeyboard(.interactively)
             .onTapGesture { IOSKeyboard.dismiss() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Offline") { dismiss() }
-                }
-            }
             .onAppear {
-                serverURL = store.serverURL
-                if displayName.isEmpty { displayName = store.space.authorName }
+                if displayName.isEmpty && store.space.authorName != "Owner" {
+                    displayName = store.space.authorName
+                }
                 if email.isEmpty { email = store.space.email }
                 store.authErrorMessage = nil
             }
         }
     }
 
-    private func inputBox<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-            content()
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.07)))
+    private func modeTab(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13.5, weight: active ? .semibold : .medium))
+                .foregroundStyle(active ? .white : .white.opacity(0.55))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background {
+                    if active {
+                        Capsule()
+                            .fill(Color.white.opacity(0.16))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.75))
+                            .matchedGeometryEffect(id: "iosLoginPill", in: modePillNS)
+                    }
+                }
         }
+        .buttonStyle(.plain)
+    }
+
+    private func fieldRow<Content: View>(icon: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.52))
+                .frame(width: 20)
+            content()
+                .font(.system(size: 15))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.75)
+                )
+        )
     }
 
     private func submit() {
@@ -127,9 +186,18 @@ struct IOSLoginSheet: View {
         IOSHaptics.shared.tap()
         Task {
             if isRegisterMode {
-                await store.registerAccount(serverURL: serverURL, email: email, password: password, displayName: displayName)
+                await store.registerAccount(
+                    serverURL: store.serverURL,
+                    email: email,
+                    password: password,
+                    displayName: displayName
+                )
             } else {
-                await store.signIn(serverURL: serverURL, email: email, password: password)
+                await store.signIn(
+                    serverURL: store.serverURL,
+                    email: email,
+                    password: password
+                )
             }
             if store.isSignedIn { dismiss() }
         }

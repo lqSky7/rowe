@@ -22,14 +22,14 @@ RoweServer/data/
 *.db-wal
 
 # Internal RE notes & reference screenshots (do not push)
-archived/
-calendar-and-tasks/
-connections/
-document-editor-and-inspector/
-document-sidebar/
-documents-and-navigation/
-ios-screenshots/
-settings/
-share-publish-export/
-slash-menu/
-v2-editor-spec/
+/archived/
+/calendar-and-tasks/
+/connections/
+/document-editor-and-inspector/
+/document-sidebar/
+/documents-and-navigation/
+/ios-screenshots/
+/settings/
+/share-publish-export/
+/slash-menu/
+/v2-editor-spec/

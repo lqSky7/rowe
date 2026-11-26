@@ -36,6 +36,8 @@ func (s *SQLiteStore) migrate() error {
 			id TEXT PRIMARY KEY,
 			email TEXT NOT NULL UNIQUE,
 			display_name TEXT NOT NULL DEFAULT '',
+			avatar_base64 TEXT NOT NULL DEFAULT '',
+			avatar_mime TEXT NOT NULL DEFAULT '',
 			password_hash TEXT NOT NULL,
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
@@ -82,6 +84,8 @@ func (s *SQLiteStore) migrate() error {
 			return err
 		}
 	}
+	_ = s.db.exec(`ALTER TABLE users ADD COLUMN avatar_base64 TEXT NOT NULL DEFAULT ''`)
+	_ = s.db.exec(`ALTER TABLE users ADD COLUMN avatar_mime TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -110,16 +114,18 @@ func (s *SQLiteStore) GetUserByEmail(_ context.Context, email string) (*model.Us
 	email = strings.ToLower(strings.TrimSpace(email))
 	var out *model.User
 	err := s.db.queryRows(
-		`SELECT id, email, display_name, password_hash, created_at, updated_at FROM users WHERE email = ? LIMIT 1`,
+		`SELECT id, email, display_name, avatar_base64, avatar_mime, password_hash, created_at, updated_at FROM users WHERE email = ? LIMIT 1`,
 		[]any{email},
 		func(cols []any) error {
 			out = &model.User{
 				ID:           asString(cols[0]),
 				Email:        asString(cols[1]),
 				DisplayName:  asString(cols[2]),
-				PasswordHash: asString(cols[3]),
-				CreatedAt:    time.UnixMilli(asInt64(cols[4])).UTC(),
-				UpdatedAt:    time.UnixMilli(asInt64(cols[5])).UTC(),
+				AvatarBase64: asString(cols[3]),
+				AvatarMime:   asString(cols[4]),
+				PasswordHash: asString(cols[5]),
+				CreatedAt:    time.UnixMilli(asInt64(cols[6])).UTC(),
+				UpdatedAt:    time.UnixMilli(asInt64(cols[7])).UTC(),
 			}
 			return nil
 		},
@@ -136,16 +142,18 @@ func (s *SQLiteStore) GetUserByEmail(_ context.Context, email string) (*model.Us
 func (s *SQLiteStore) GetUserByID(_ context.Context, id string) (*model.User, error) {
 	var out *model.User
 	err := s.db.queryRows(
-		`SELECT id, email, display_name, password_hash, created_at, updated_at FROM users WHERE id = ? LIMIT 1`,
+		`SELECT id, email, display_name, avatar_base64, avatar_mime, password_hash, created_at, updated_at FROM users WHERE id = ? LIMIT 1`,
 		[]any{id},
 		func(cols []any) error {
 			out = &model.User{
 				ID:           asString(cols[0]),
 				Email:        asString(cols[1]),
 				DisplayName:  asString(cols[2]),
-				PasswordHash: asString(cols[3]),
-				CreatedAt:    time.UnixMilli(asInt64(cols[4])).UTC(),
-				UpdatedAt:    time.UnixMilli(asInt64(cols[5])).UTC(),
+				AvatarBase64: asString(cols[3]),
+				AvatarMime:   asString(cols[4]),
+				PasswordHash: asString(cols[5]),
+				CreatedAt:    time.UnixMilli(asInt64(cols[6])).UTC(),
+				UpdatedAt:    time.UnixMilli(asInt64(cols[7])).UTC(),
 			}
 			return nil
 		},
@@ -170,6 +178,13 @@ func (s *SQLiteStore) UpdateUserProfile(_ context.Context, userID, displayName s
 	return s.db.exec(
 		`UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?`,
 		displayName, time.Now().UTC().UnixMilli(), userID,
+	)
+}
+
+func (s *SQLiteStore) UpdateUserAvatar(_ context.Context, userID, avatarBase64, avatarMime string) error {
+	return s.db.exec(
+		`UPDATE users SET avatar_base64 = ?, avatar_mime = ?, updated_at = ? WHERE id = ?`,
+		avatarBase64, avatarMime, time.Now().UTC().UnixMilli(), userID,
 	)
 }
 

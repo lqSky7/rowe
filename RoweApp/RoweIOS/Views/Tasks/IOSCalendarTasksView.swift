@@ -223,14 +223,14 @@ struct IOSTaskRow: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(
-                        redFlash || state == .cancelled
+                        redFlash || state == .canceled
                             ? Color.red
                             : (state == .completed ? Color.primary.opacity(0.65) : Color.clear)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .strokeBorder(
-                                redFlash || state == .cancelled
+                                redFlash || state == .canceled
                                     ? Color.red
                                     : (state == .completed ? Color.clear : Color.primary.opacity(0.35)),
                                 lineWidth: 1.5
@@ -240,7 +240,7 @@ struct IOSTaskRow: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(Color(uiColor: .systemBackground))
-                } else if state == .cancelled || redFlash {
+                } else if state == .canceled || redFlash {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
@@ -251,7 +251,7 @@ struct IOSTaskRow: View {
             .onTapGesture(count: 2) {
                 IOSHaptics.shared.errorBuzz()
                 withAnimation(.easeInOut(duration: 0.16)) { redFlash = true }
-                store.setTaskState(docId: item.documentId, blockId: item.block.id, state: state == .cancelled ? .pending : .cancelled)
+                store.setTaskState(docId: item.documentId, blockId: item.block.id, state: state == .canceled ? .pending : .canceled)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { redFlash = false }
             }
             .onTapGesture(count: 1) {
@@ -264,7 +264,7 @@ struct IOSTaskRow: View {
 
             Text(item.block.content.isEmpty ? "Untitled Task" : item.block.content)
                 .font(.system(size: 16))
-                .strikethrough(state != .pending, color: state == .cancelled ? .red.opacity(0.8) : .secondary)
+                .strikethrough(state != .pending, color: state == .canceled ? .red.opacity(0.8) : .secondary)
                 .foregroundStyle(state != .pending ? .secondary : .primary)
                 .lineLimit(1)
 
