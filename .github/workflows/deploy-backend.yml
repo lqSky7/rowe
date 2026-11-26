@@ -48,13 +48,6 @@ jobs:
         run: |
           tar -C RoweServer -czf "$RUNNER_TEMP/rowe-server.tar.gz" \
             cmd internal go.mod Dockerfile docker-compose.yml .env.example
-          ssh -i "$RUNNER_TEMP/deploy-key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
-            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-            "${PRODUCTION_USER}@${PRODUCTION_HOST}" 'bash -s' \
-            < <(cat scripts/deploy-server.sh; echo ""; exit 0) || true
-          # Stream deploy-server.sh with tarball separately so stdin carries the tar stream
           scp -i "$RUNNER_TEMP/deploy-key" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/known-hosts" \
