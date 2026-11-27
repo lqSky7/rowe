@@ -132,11 +132,17 @@ struct IOSSpaceAvatar: View {
 
     var body: some View {
         ZStack {
-            avatarContent
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .saturation(1.45)
-                .blur(radius: 10)
+            // Smooth radial feathered halo — never clips to a harsh blurred square
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.accentColor.opacity(0.42), Color.accentColor.opacity(0.12), .clear],
+                        center: .center,
+                        startRadius: size * 0.28,
+                        endRadius: size * 0.72
+                    )
+                )
+                .frame(width: size * 1.55, height: size * 1.55)
                 .scaleEffect(glowScale)
                 .opacity(glowOpacity)
                 .allowsHitTesting(false)
@@ -146,9 +152,13 @@ struct IOSSpaceAvatar: View {
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
+                        .strokeBorder(
+                            glowOpacity > 0.05 ? Color.accentColor.opacity(0.55) : Color.primary.opacity(0.14),
+                            lineWidth: glowOpacity > 0.05 ? 1.25 : 0.75
+                        )
                 )
         }
+        .frame(width: size, height: size)
         .onChange(of: syncPulseId) { _, _ in
             guard let dir = syncPulseDirection else { return }
             triggerGlow(direction: dir)
@@ -159,26 +169,32 @@ struct IOSSpaceAvatar: View {
         glowTask?.cancel()
         switch direction {
         case .sent:
-            // Minimal in -> out blurred PFP aura
-            glowScale = 0.96
-            glowOpacity = 0.50
-            withAnimation(.easeOut(duration: 0.72)) {
-                glowScale = 1.30
-                glowOpacity = 0.0
-            }
-        case .received:
-            // Minimal out -> in blurred PFP aura
-            glowScale = 1.32
+            glowScale = 0.92
             glowOpacity = 0.0
-            withAnimation(.easeOut(duration: 0.34)) {
-                glowScale = 1.06
-                glowOpacity = 0.48
+            withAnimation(.easeOut(duration: 0.25)) {
+                glowScale = 1.08
+                glowOpacity = 0.75
             }
             glowTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 340_000_000)
+                try? await Task.sleep(nanoseconds: 250_000_000)
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeIn(duration: 0.38)) {
-                    glowScale = 0.96
+                withAnimation(.easeInOut(duration: 0.55)) {
+                    glowScale = 1.22
+                    glowOpacity = 0.0
+                }
+            }
+        case .received:
+            glowScale = 1.20
+            glowOpacity = 0.0
+            withAnimation(.easeOut(duration: 0.30)) {
+                glowScale = 1.04
+                glowOpacity = 0.72
+            }
+            glowTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.52)) {
+                    glowScale = 0.94
                     glowOpacity = 0.0
                 }
             }
@@ -353,7 +369,8 @@ struct IOSPullDownToSearchModifier: ViewModifier {
     @State private var pullDistance: CGFloat = 0
     @State private var hasTriggered = false
 
-    private let triggerThreshold: CGFloat = 92
+    // Deliberate pull distance so casual scrolling never triggers Global Search accidentally.
+    private let triggerThreshold: CGFloat = 148
 
     func body(content: Content) -> some View {
         let progress = min(1.0, max(0.0, pullDistance / triggerThreshold))
@@ -375,14 +392,14 @@ struct IOSPullDownToSearchModifier: ViewModifier {
                 }
             }
             .overlay(alignment: .top) {
-                if progress > 0.22 && !isPresented {
+                if progress > 0.42 && !isPresented {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(progress >= 0.85 ? Color.accentColor : .primary)
+                        .foregroundStyle(progress >= 0.88 ? Color.accentColor : .primary)
                         .frame(width: 36, height: 36)
                         .roweIOSGlass(in: Circle(), interactive: false)
                         .scaleEffect(0.65 + 0.35 * progress)
-                        .opacity(Double(min(1.0, (progress - 0.18) * 1.4)))
+                        .opacity(Double(min(1.0, (progress - 0.38) * 1.7)))
                         .padding(.top, 10)
                         .allowsHitTesting(false)
                 }
@@ -393,5 +410,37 @@ struct IOSPullDownToSearchModifier: ViewModifier {
 extension View {
     func iosPullDownToSearch(isPresented: Binding<Bool>, reduceMotion: Bool = false) -> some View {
         modifier(IOSPullDownToSearchModifier(isPresented: isPresented, reduceMotion: reduceMotion))
+    }
+}
+
+/// Smooth progressive blur fade for top & bottom edges of scrollable iOS views.
+struct IOSProgressiveBlurEdge: View {
+    enum Edge { case top, bottom }
+    let edge: Edge
+    var height: CGFloat = 84
+
+    var body: some View {
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .mask(
+                LinearGradient(
+                    stops: edge == .top
+                        ? [.init(color: .black, location: 0.0), .init(color: .black.opacity(0.65), location: 0.48), .init(color: .clear, location: 1.0)]
+                        : [.init(color: .clear, location: 0.0), .init(color: .black.opacity(0.65), location: 0.52), .init(color: .black, location: 1.0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay(
+                LinearGradient(
+                    colors: edge == .top
+                        ? [Color(uiColor: .systemBackground).opacity(0.52), .clear]
+                        : [.clear, Color(uiColor: .systemBackground).opacity(0.62)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .frame(height: height)
+            .allowsHitTesting(false)
     }
 }

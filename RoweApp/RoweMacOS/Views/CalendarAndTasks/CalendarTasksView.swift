@@ -2,6 +2,7 @@ import SwiftUI
 import RoweCore
 
 struct CalendarTasksView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
     @State private var showTasks = true
     @State private var showEvents = false
@@ -21,7 +22,7 @@ struct CalendarTasksView: View {
     }
 
     private var selectedAccent: Color {
-        Color(hex: store.settings.accentColor.hex)
+        Color(hex: store.settings.accentColor.resolvedHex(isDark: colorScheme == .dark))
     }
 
     private var dullAccent: Color {

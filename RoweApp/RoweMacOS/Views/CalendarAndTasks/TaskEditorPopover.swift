@@ -282,12 +282,12 @@ struct TaskEditorPopover: View {
                 }
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Button {
                     HapticsManager.shared.tap()
                     showSchedulePicker.toggle()
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: repeatRule != nil ? "repeat" : "calendar")
                             .font(.system(size: 12))
                         Text(scheduleLabel)
@@ -298,11 +298,12 @@ struct TaskEditorPopover: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(RowePressScaleButtonStyle())
-                .roweGlassCapsule(interactive: true)
+                .buttonStyle(.plain)
                 .popover(isPresented: $showSchedulePicker, arrowEdge: .bottom) {
                     TaskDateRepeatPicker(
                         selectedDate: $scheduleDate,
@@ -320,18 +321,18 @@ struct TaskEditorPopover: View {
                     HapticsManager.shared.tap()
                     showDeadlinePicker.toggle()
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Image(systemName: "flag")
                             .font(.system(size: 12))
                         Text(deadlineDate.map(shortDateLabel) ?? "Deadline")
                             .font(.system(size: 13))
                     }
                     .foregroundStyle(deadlineDate == nil ? .secondary : .primary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(RowePressScaleButtonStyle())
-                .roweGlassCapsule(interactive: true)
+                .buttonStyle(.plain)
                 .popover(isPresented: $showDeadlinePicker, arrowEdge: .bottom) {
                     TaskDateRepeatPicker(
                         selectedDate: $deadlineDate,
@@ -343,9 +344,23 @@ struct TaskEditorPopover: View {
                     .onChange(of: deadlineDate) { _, _ in if existingItem != nil { persistExistingChanges() } }
                 }
 
-                GlassCircleButton(systemImage: "photo.badge.plus", helpText: "Attach Image (or paste ⌘V)", size: 30, iconSize: 12) {
+                Button {
+                    HapticsManager.shared.tap()
                     pickImageFromDisk()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 12.5))
+                        Text("Image")
+                            .font(.system(size: 13))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help("Attach Image (or paste ⌘V)")
 
                 Spacer()
 

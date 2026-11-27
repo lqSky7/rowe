@@ -50,6 +50,27 @@ public enum AccentColorChoice: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// Richer, high-contrast shade for Light Mode so accents remain crisp and legible on white surfaces.
+    public var lightHex: String {
+        switch self {
+        case .slateSky: "#2E628E"
+        case .babyPink: "#C2466D"
+        case .dustyPeach: "#C25B36"
+        case .sageMist: "#347555"
+        case .lavenderHaze: "#6A50A8"
+        case .periwinkle: "#445CB0"
+        case .buttercream: "#A67C18"
+        case .dustyRose: "#9E4661"
+        case .warmSand: "#826845"
+        case .graphite: "#2B2F36"
+        }
+    }
+
+    public func resolvedHex(isDark: Bool) -> String {
+        if self == .graphite && isDark { return "#F3F4F6" }
+        return isDark ? hex : lightHex
+    }
+
     /// Muted, lower-saturation shade for calm surface fills like Calendar date cards.
     public var dullHex: String {
         switch self {

@@ -36,12 +36,9 @@ struct CraftWindowShell: View {
         }
     }
 
-    /// Keeps text insertion cursors and controls high-contrast in dark mode when Graphite is selected.
+    /// Uses high-contrast accent shades in Light Mode and calm pastels in Dark Mode.
     private var resolvedAccentColor: Color {
-        if store.settings.accentColor == .graphite && isDarkAppearance {
-            return Color(hex: "#F3F4F6")
-        }
-        return Color(hex: store.settings.accentColor.hex)
+        Color(hex: store.settings.accentColor.resolvedHex(isDark: isDarkAppearance))
     }
 
     var body: some View {

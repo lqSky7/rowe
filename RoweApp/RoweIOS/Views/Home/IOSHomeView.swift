@@ -51,51 +51,31 @@ struct IOSHomeView: View {
 
                     Spacer()
 
-                    HStack(spacing: 14) {
-                        Menu {
-                            Button("New Document", systemImage: "doc.badge.plus") {
-                                let d = store.createDocument(openImmediately: false)
-                                onOpenDoc(d.id)
-                            }
-                            if store.hasVaultPin && !store.unlockedDocumentIds.isEmpty {
-                                Button("Lock All Open Notes", systemImage: "lock.fill") {
-                                    store.relockAllDocuments()
-                                }
-                            }
-                            Divider()
-                            Button(store.isSignedIn ? "Sync Now" : "Sign In to Sync", systemImage: "arrow.triangle.2.circlepath") {
-                                if store.isSignedIn {
-                                    Task { await store.syncWithBackend() }
-                                } else {
-                                    store.isLoginSheetPresented = true
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .frame(width: 30, height: 30)
+                    Menu {
+                        Button("New Document", systemImage: "doc.badge.plus") {
+                            let d = store.createDocument(openImmediately: false)
+                            onOpenDoc(d.id)
                         }
-
-                        Button {
-                            IOSHaptics.shared.tap()
+                        if store.hasVaultPin && !store.unlockedDocumentIds.isEmpty {
+                            Button("Lock All Open Notes", systemImage: "lock.fill") {
+                                store.relockAllDocuments()
+                            }
+                        }
+                        Divider()
+                        Button(store.isSignedIn ? "Sync Now" : "Sign In to Sync", systemImage: "arrow.triangle.2.circlepath") {
                             if store.isSignedIn {
                                 Task { await store.syncWithBackend() }
                             } else {
                                 store.isLoginSheetPresented = true
                             }
-                        } label: {
-                            Image(systemName: store.isSignedIn ? "bell.badge" : "bell")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .frame(width: 30, height: 30)
                         }
-                        .buttonStyle(RowePressScaleStyle())
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 38, height: 38)
+                            .roweIOSGlass(in: Circle(), interactive: true)
                     }
-                    .tint(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .roweIOSGlassCapsule(interactive: true)
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 8)

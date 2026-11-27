@@ -49,6 +49,7 @@ struct IOSRootShellView: View {
     @State private var quickAddDefaultDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var editingTaskItem: ResolvedTaskItem? = nil
     @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding")
+    @Namespace private var composerMorphNS
 
     private var preferredScheme: ColorScheme? {
         switch store.settings.appearanceMode {
@@ -58,11 +59,12 @@ struct IOSRootShellView: View {
         }
     }
 
+    private var isDarkMode: Bool {
+        (preferredScheme ?? systemColorScheme) == .dark
+    }
+
     private var resolvedAccent: Color {
-        if store.settings.accentColor == .graphite && (preferredScheme ?? systemColorScheme) == .dark {
-            return Color(hex: "#F3F4F6")
-        }
-        return Color(hex: store.settings.accentColor.hex)
+        Color(hex: store.settings.accentColor.resolvedHex(isDark: isDarkMode))
     }
 
     private var activePath: [IOSRoute] {
@@ -115,54 +117,60 @@ struct IOSRootShellView: View {
             )
             .ignoresSafeArea()
 
-            // Floating Liquid Glass '+' button aligned to the bottom alongside the iOS 26 tab bar pill
-            if !shouldHideBottomControls {
+            // Floating '+' button morphing smoothly into the centered Task Composer above the keyboard
+            if !shouldHideBottomControls && !showQuickAddSheet {
                 IOSGlassCircleButton(systemImage: "plus", size: 56, iconSize: 22) {
-                    IOSKeyboard.dismiss()
                     if selectedTab == .calendar || selectedTab == .tasks {
                         editingTaskItem = nil
                         quickAddDefaultDate = Calendar.current.startOfDay(for: Date())
-                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
                             showQuickAddSheet = true
                         }
                     } else {
+                        IOSKeyboard.dismiss()
                         let doc = store.createDocument(openImmediately: false)
                         homePath.append(.document(doc.id))
                     }
                 }
+                .matchedGeometryEffect(id: "taskComposerMorph", in: composerMorphNS)
                 .padding(.trailing, 18)
                 .padding(.bottom, 20)
                 .ignoresSafeArea(.container, edges: .bottom)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.scale(scale: 0.85).combined(with: .opacity))
             }
 
-            // Unified Floating Task Composer (Create & Edit) above keyboard
             if showQuickAddSheet {
-                Color.black.opacity(0.35)
+                Color.black.opacity(0.32)
                     .ignoresSafeArea()
                     .onTapGesture {
                         IOSKeyboard.dismiss()
-                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
                             showQuickAddSheet = false
                             editingTaskItem = nil
                         }
                     }
 
-                IOSQuickAddTaskCard(
-                    store: store,
-                    initialDate: quickAddDefaultDate,
-                    editingItem: editingTaskItem
-                ) {
-                    IOSKeyboard.dismiss()
-                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                        showQuickAddSheet = false
-                        editingTaskItem = nil
+                VStack {
+                    Spacer(minLength: 0)
+                    IOSQuickAddTaskCard(
+                        store: store,
+                        initialDate: quickAddDefaultDate,
+                        editingItem: editingTaskItem
+                    ) {
+                        IOSKeyboard.dismiss()
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+                            showQuickAddSheet = false
+                            editingTaskItem = nil
+                        }
                     }
+                    .id(editingTaskItem?.id ?? "create-new-task")
+                    .frame(maxWidth: .infinity)
+                    .matchedGeometryEffect(id: "taskComposerMorph", in: composerMorphNS)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
                 }
-                .id(editingTaskItem?.id ?? "create-new-task")
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity))
             }
 
             // Global Contextual Search (pull-down from anywhere on iOS, matching macOS QuickOpenPanel)

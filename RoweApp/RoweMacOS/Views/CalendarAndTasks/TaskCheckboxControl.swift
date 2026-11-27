@@ -1,8 +1,8 @@
 import SwiftUI
 import RoweCore
 
-/// Craft-style task checkbox supporting zero-latency single-click completion
-/// and instant double-click cross-out (`canceled`) with red flash + trackpad buzz vibration.
+/// Craft-style task checkbox supporting zero-latency single-click completion (with accent glow)
+/// and instant double-click cross-out (`canceled`) with red glow + trackpad buzz vibration.
 struct TaskCheckboxControl: View {
     let state: TaskCompletionState
     let onChange: (TaskCompletionState) -> Void
@@ -10,6 +10,7 @@ struct TaskCheckboxControl: View {
     @State private var lastClickTimestamp: TimeInterval = 0
     @State private var popScale: CGFloat = 1.0
     @State private var isFlashingRed: Bool = false
+    @State private var isFlashingAccent: Bool = false
 
     var body: some View {
         Button {
@@ -29,6 +30,7 @@ struct TaskCheckboxControl: View {
                 case .pending:
                     HapticsManager.shared.taskComplete()
                     SoundManager.shared.playComplete()
+                    triggerAccentFlash()
                     onChange(.completed)
                 case .completed, .canceled:
                     HapticsManager.shared.tap()
@@ -42,9 +44,9 @@ struct TaskCheckboxControl: View {
                     .frame(width: 16, height: 16)
                     .background {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.red.opacity(isFlashingRed ? 0.34 : 0))
-                            .frame(width: 22, height: 22)
-                            .blur(radius: 2)
+                            .fill(glowColor)
+                            .frame(width: 24, height: 24)
+                            .blur(radius: 3.5)
                             .allowsHitTesting(false)
                     }
                     .overlay(
@@ -53,6 +55,7 @@ struct TaskCheckboxControl: View {
                     )
                     .animation(.spring(response: 0.22, dampingFraction: 0.72), value: state)
                     .animation(.easeOut(duration: 0.16), value: isFlashingRed)
+                    .animation(.easeOut(duration: 0.16), value: isFlashingAccent)
 
                 if state == .completed && !isFlashingRed {
                     Image(systemName: "checkmark")
@@ -74,6 +77,14 @@ struct TaskCheckboxControl: View {
         .help("Click to complete · Double-click to cross out")
     }
 
+    private var glowColor: Color {
+        if isFlashingRed { return Color.red.opacity(0.45) }
+        if isFlashingAccent { return Color.accentColor.opacity(0.45) }
+        if state == .canceled { return Color.red.opacity(0.22) }
+        if state == .completed { return Color.accentColor.opacity(0.22) }
+        return .clear
+    }
+
     private func triggerPop() {
         withAnimation(.spring(response: 0.16, dampingFraction: 0.55)) {
             popScale = 1.2
@@ -91,9 +102,21 @@ struct TaskCheckboxControl: View {
             isFlashingRed = true
         }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 320_000_000)
-            withAnimation(.easeInOut(duration: 0.24)) {
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            withAnimation(.easeInOut(duration: 0.26)) {
                 isFlashingRed = false
+            }
+        }
+    }
+
+    private func triggerAccentFlash() {
+        withAnimation(.easeOut(duration: 0.08)) {
+            isFlashingAccent = true
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            withAnimation(.easeInOut(duration: 0.26)) {
+                isFlashingAccent = false
             }
         }
     }
@@ -102,7 +125,7 @@ struct TaskCheckboxControl: View {
         switch state {
         case .pending: .clear
         case .completed: Color.accentColor
-        case .canceled: Color.red.opacity(0.72)
+        case .canceled: Color.red.opacity(0.76)
         }
     }
 

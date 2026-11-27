@@ -331,7 +331,7 @@ struct IOSSwipeBackEnabler: UIViewControllerRepresentable {
     }
 }
 
-/// Makes any custom floating iOS sheet/card dismissable by dragging down anywhere on it.
+/// Makes floating iOS sheets/cards dismissable by dragging down without swallowing taps on nested Menu buttons.
 struct IOSDragToDismissModifier: ViewModifier {
     var onDismiss: () -> Void
     @State private var dragOffsetY: CGFloat = 0
@@ -341,14 +341,14 @@ struct IOSDragToDismissModifier: ViewModifier {
             .offset(y: max(0, dragOffsetY))
             .opacity(dragOffsetY > 0 ? max(0.35, 1.0 - Double(dragOffsetY) / 260.0) : 1.0)
             .simultaneousGesture(
-                DragGesture(minimumDistance: 14)
+                DragGesture(minimumDistance: 28, coordinateSpace: .local)
                     .onChanged { value in
-                        guard value.translation.height > 0,
-                              abs(value.translation.height) > abs(value.translation.width) * 1.1 else { return }
+                        guard value.translation.height > 12,
+                              abs(value.translation.height) > abs(value.translation.width) * 1.4 else { return }
                         dragOffsetY = value.translation.height
                     }
                     .onEnded { value in
-                        if value.translation.height > 75 || value.predictedEndTranslation.height > 145 {
+                        if value.translation.height > 85 || value.predictedEndTranslation.height > 165 {
                             IOSHaptics.shared.tap()
                             withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
                                 dragOffsetY = 260

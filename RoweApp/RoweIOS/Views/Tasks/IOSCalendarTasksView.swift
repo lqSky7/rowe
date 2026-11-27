@@ -1,4 +1,6 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 import RoweCore
 
 enum IOSTaskViewMode {
@@ -6,13 +8,15 @@ enum IOSTaskViewMode {
     case allTasks
 }
 
-/// iOS Calendar & Tasks view refined to match Craft's calm rhythm:
+/// iOS Calendar & Tasks view:
 /// - Date-grouped timeline with crisp hairline separators under every day header
-/// - Bolder, easy-to-read multiline task titles
-/// - "Show Previous Days" revealed on a gentle pull-down (below search trigger) and hidden when leaving the tab
-/// - "View Completed" shown only once all tasks for a day are completed (replacing the sparkle banner)
-/// - Tapping any task or '+' opens the unified floating Task Composer (Date, Deadline, Repeat, Reminder, Notes).
+/// - Progressive blur fade on top and bottom edges
+/// - Bolder, easy-to-read multiline task titles with red-cross glow and accent tick glow
+/// - "View Completed" shown only once all tasks for a day are completed
+/// - "Show Previous Days" cleanly tucked inside the ••• menu (no accidental down-scroll reveal)
+/// - Unified floating Task Composer supporting Today/Tomorrow/Calendar, Daily/Weekly/Monthly repeat, and pasting/attaching photos.
 struct IOSCalendarTasksView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
     let mode: IOSTaskViewMode
     let zoomNamespace: Namespace.ID
@@ -22,7 +26,6 @@ struct IOSCalendarTasksView: View {
 
     @State private var showCompleted: Bool = false
     @State private var showPreviousDays: Bool = false
-    @State private var isPreviousDaysRevealed: Bool = false
     @State private var expandedCompletedDays: Set<Date> = []
     @State private var lingeringTaskIds: Set<String> = []
     @State private var lingerTimers: [String: Task<Void, Never>] = [:]
@@ -32,7 +35,7 @@ struct IOSCalendarTasksView: View {
     }
 
     private var selectedAccent: Color {
-        Color(hex: store.settings.accentColor.hex)
+        Color(hex: store.settings.accentColor.resolvedHex(isDark: colorScheme == .dark))
     }
 
     private var allTasks: [ResolvedTaskItem] {
@@ -47,115 +50,72 @@ struct IOSCalendarTasksView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // Top bar
-                HStack {
-                    Button {
-                        IOSHaptics.shared.tap()
-                        onOpenSettings()
-                    } label: {
-                        IOSSpaceAvatar(
-                            space: store.space,
-                            size: 38,
-                            cornerRadius: 11,
-                            syncPulseId: store.syncPulseId,
-                            syncPulseDirection: store.syncPulseDirection
-                        )
-                    }
-                    .buttonStyle(RowePressScaleStyle())
-                    .matchedTransitionSource(id: "settings-avatar", in: zoomNamespace)
+        ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Top bar (avatar + clean ••• menu, no unused notification bell)
+                    HStack {
+                        Button {
+                            IOSHaptics.shared.tap()
+                            onOpenSettings()
+                        } label: {
+                            IOSSpaceAvatar(
+                                space: store.space,
+                                size: 38,
+                                cornerRadius: 11,
+                                syncPulseId: store.syncPulseId,
+                                syncPulseDirection: store.syncPulseDirection
+                            )
+                        }
+                        .buttonStyle(RowePressScaleStyle())
+                        .matchedTransitionSource(id: "settings-avatar", in: zoomNamespace)
 
-                    Spacer()
+                        Spacer()
 
-                    HStack(spacing: 14) {
                         Menu {
                             Toggle("Show Completed", isOn: $showCompleted)
                             Toggle("Show Previous Days", isOn: $showPreviousDays)
+                            Divider()
                             Button("Add Task", systemImage: "plus") { onOpenQuickAdd(nil) }
                         } label: {
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.primary)
-                                .frame(width: 30, height: 30)
+                                .frame(width: 38, height: 38)
+                                .roweIOSGlass(in: Circle(), interactive: true)
                         }
-
-                        Button {
-                            IOSHaptics.shared.tap()
-                            if store.isSignedIn {
-                                Task { await store.syncWithBackend() }
-                            } else {
-                                store.isLoginSheetPresented = true
-                            }
-                        } label: {
-                            Image(systemName: "bell")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .frame(width: 30, height: 30)
-                        }
-                        .buttonStyle(RowePressScaleStyle())
                     }
-                    .tint(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .roweIOSGlassCapsule(interactive: true)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+
+                    if mode == .calendar {
+                        VStack(alignment: .leading, spacing: 34) {
+                            ForEach(visibleDays, id: \.self) { day in
+                                daySection(for: day)
+                                    .transition(.opacity)
+                            }
+                        }
+                    } else {
+                        allTasksBody
+                    }
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-
-                if mode == .calendar {
-                    // Locked behind a gentle pull-down scroll (26pt–85pt); auto-hides when switching tabs
-                    if isPreviousDaysRevealed || showPreviousDays {
-                        Button {
-                            IOSHaptics.shared.tap()
-                            withAnimation(.easeInOut(duration: 0.22)) {
-                                showPreviousDays.toggle()
-                                if !showPreviousDays { isPreviousDaysRevealed = false }
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.system(size: 12))
-                                Text(showPreviousDays ? "Hide Previous Days" : "Show Previous Days")
-                                    .font(.system(size: 13, weight: .medium))
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 18)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-
-                    VStack(alignment: .leading, spacing: 34) {
-                        ForEach(visibleDays, id: \.self) { day in
-                            daySection(for: day)
-                                .transition(.opacity)
-                        }
-                    }
-                } else {
-                    allTasksBody
-                }
+                .padding(.bottom, 124)
             }
-            .padding(.bottom, 120)
-        }
-        .onScrollGeometryChange(for: CGFloat.self) { geo in
-            geo.contentOffset.y + geo.contentInsets.top
-        } action: { _, adjustedOffset in
-            guard mode == .calendar else { return }
-            let pulled = max(0, -adjustedOffset)
-            if pulled >= 26 && pulled < 85 && !isPreviousDaysRevealed && !showPreviousDays {
-                IOSHaptics.shared.tap()
-                withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
-                    isPreviousDaysRevealed = true
-                }
+            .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: reduceMotion)
+            .scrollDismissesKeyboard(.interactively)
+
+            // Subtle progressive blur on top and bottom edges
+            VStack {
+                IOSProgressiveBlurEdge(edge: .top, height: 68)
+                Spacer()
+                IOSProgressiveBlurEdge(edge: .bottom, height: 108)
             }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
         }
         .onDisappear {
-            isPreviousDaysRevealed = false
             showPreviousDays = false
         }
-        .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: reduceMotion)
-        .scrollDismissesKeyboard(.interactively)
         .toolbar(.hidden, for: .navigationBar)
     }
 
@@ -229,7 +189,6 @@ struct IOSCalendarTasksView: View {
                     }
                 }
 
-                // Subtle hairline separator matching Craft Calendar
                 Divider()
                     .opacity(0.28)
             }
@@ -250,7 +209,6 @@ struct IOSCalendarTasksView: View {
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pendingTasks.map(\.id))
             }
 
-            // Show "View Completed" only when all tasks for that day are completed (or if user explicitly toggled it)
             if (pendingTasks.isEmpty && !finishedTasks.isEmpty) || (showDayCompleted && !finishedTasks.isEmpty) {
                 Button {
                     IOSHaptics.shared.tap()
@@ -367,7 +325,6 @@ struct IOSCalendarTasksView: View {
             return
         }
 
-        // Linger for 3s so double-tap red cross-out or quick undo never races with removal.
         lingeringTaskIds.insert(id)
         store.setTaskState(docId: item.documentId, blockId: id, state: newState)
 
@@ -383,11 +340,13 @@ struct IOSCalendarTasksView: View {
 }
 
 struct IOSTaskRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
     let item: ResolvedTaskItem
     var onSelectTask: (() -> Void)? = nil
     var onStateChange: ((TaskCompletionState) -> Void)? = nil
     @State private var redFlash = false
+    @State private var accentFlash = false
     @State private var popScale: CGFloat = 1.0
     @State private var lastTapDate: Date = .distantPast
 
@@ -396,12 +355,26 @@ struct IOSTaskRow: View {
     }
 
     private var selectedAccent: Color {
-        Color(hex: store.settings.accentColor.hex)
+        Color(hex: store.settings.accentColor.resolvedHex(isDark: colorScheme == .dark))
+    }
+
+    private var checkboxGlowColor: Color {
+        if redFlash { return Color.red.opacity(0.50) }
+        if accentFlash { return selectedAccent.opacity(0.50) }
+        if state == .canceled { return Color.red.opacity(0.24) }
+        if state == .completed { return selectedAccent.opacity(0.24) }
+        return .clear
     }
 
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(checkboxGlowColor)
+                    .frame(width: 28, height: 28)
+                    .blur(radius: 4.5)
+                    .allowsHitTesting(false)
+
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(
                         redFlash || state == .canceled
@@ -429,6 +402,8 @@ struct IOSTaskRow: View {
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
             }
+            .animation(.easeOut(duration: 0.16), value: redFlash)
+            .animation(.easeOut(duration: 0.16), value: accentFlash)
             .scaleEffect(popScale)
             .frame(width: 22, height: 22)
             .contentShape(Rectangle().inset(by: -10))
@@ -455,12 +430,6 @@ struct IOSTaskRow: View {
 
                 Spacer(minLength: 6)
 
-                if !(item.block.task?.notes.isEmpty ?? true) {
-                    Image(systemName: "text.alignleft")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-
                 if let imgs = item.block.task?.attachedImagesBase64, !imgs.isEmpty {
                     HStack(spacing: 3) {
                         Image(systemName: "photo")
@@ -472,18 +441,6 @@ struct IOSTaskRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
                     .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(0.08)))
-                }
-
-                if item.block.task?.deadlineDate != nil {
-                    Image(systemName: "flag.fill")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.orange)
-                }
-
-                if item.block.task?.reminderDate != nil {
-                    Image(systemName: "alarm")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
                 }
 
                 if item.block.task?.repeatRule != nil {
@@ -520,43 +477,15 @@ struct IOSTaskRow: View {
                         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))
                         updateTaskMeta { $0.scheduleDate = tomorrow }
                     }
-                    Button("Next Week", systemImage: "calendar.badge.plus") {
-                        let nextWeek = Calendar.current.date(byAdding: .day, value: 7, to: Calendar.current.startOfDay(for: Date()))
-                        updateTaskMeta { $0.scheduleDate = nextWeek }
-                    }
-                    Divider()
-                    Button("Clear Date", systemImage: "calendar.badge.minus", role: .destructive) {
-                        updateTaskMeta { $0.scheduleDate = nil; $0.repeatRule = nil }
-                    }
                 }
                 Button("Edit Task…", systemImage: "pencil") {
                     onSelectTask?()
                 }
-                Menu("Remind me", systemImage: "alarm") {
-                    Button("In 1 Hour", systemImage: "clock") {
-                        updateTaskMeta { $0.reminderDate = Date().addingTimeInterval(3600) }
-                    }
-                    Button("Tonight (6:00 PM)", systemImage: "moon") {
-                        let base = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
-                        updateTaskMeta { $0.reminderDate = base }
-                    }
-                    Button("Tomorrow (9:00 AM)", systemImage: "sunrise") {
-                        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-                        let base = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
-                        updateTaskMeta { $0.reminderDate = base }
-                    }
-                    if item.block.task?.reminderDate != nil {
-                        Divider()
-                        Button("Clear Reminder", systemImage: "bell.slash", role: .destructive) {
-                            updateTaskMeta { $0.reminderDate = nil }
-                        }
-                    }
-                }
                 Menu("Repeat", systemImage: "repeat") {
-                    Button("None") {
+                    Button("Off") {
                         updateTaskMeta { $0.repeatRule = nil }
                     }
-                    ForEach(RepeatFrequency.allCases, id: \.self) { freq in
+                    ForEach([RepeatFrequency.daily, .weekly, .monthly], id: \.self) { freq in
                         Button(freq.rawValue) {
                             let start = item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: Date())
                             let weekday = Calendar.current.component(.weekday, from: start)
@@ -604,19 +533,28 @@ struct IOSTaskRow: View {
     private func triggerCompleteToggle() {
         triggerPop()
         let next: TaskCompletionState = state == .pending ? .completed : .pending
-        if next == .completed { IOSHaptics.shared.taskComplete() } else { IOSHaptics.shared.tap() }
+        if next == .completed {
+            IOSHaptics.shared.taskComplete()
+            withAnimation(.easeOut(duration: 0.08)) { accentFlash = true }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 340_000_000)
+                withAnimation(.easeInOut(duration: 0.24)) { accentFlash = false }
+            }
+        } else {
+            IOSHaptics.shared.tap()
+        }
         applyState(next)
     }
 
     private func triggerCrossOut() {
         triggerPop()
         IOSHaptics.shared.errorBuzz()
-        withAnimation(.easeOut(duration: 0.1)) { redFlash = true }
+        withAnimation(.easeOut(duration: 0.08)) { redFlash = true }
         let next: TaskCompletionState = state == .canceled ? .pending : .canceled
         applyState(next)
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 280_000_000)
-            withAnimation(.easeInOut(duration: 0.2)) { redFlash = false }
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            withAnimation(.easeInOut(duration: 0.24)) { redFlash = false }
         }
     }
 
@@ -641,7 +579,7 @@ struct IOSTaskRow: View {
 /// Unified compact floating Task Composer (used for BOTH creating and editing tasks):
 /// 1. Schedule date: Today, Tomorrow, or Open Calendar (inline graphical calendar)
 /// 2. Cycling conversational prompt ("What dya wanna do today?")
-/// 3. Repeat: Daily, Weekly, Monthly (plus Undo/Redo or Delete, and Add/Done)
+/// 3. Repeat: Daily, Weekly, Monthly + Paste/Attach Photos (matching Mac)
 struct IOSQuickAddTaskCard: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @Bindable var store: WorkspaceStore
@@ -660,7 +598,12 @@ struct IOSQuickAddTaskCard: View {
     @State private var text: String
     @State private var scheduleDate: Date
     @State private var repeatRule: RepeatRule?
+    @State private var attachedImagesBase64: [String]
     @State private var showCalendarPicker: Bool = false
+    @State private var showPhotosPicker: Bool = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var previewImageIndex: Int? = nil
+    @State private var didCopyPreviewImage: Bool = false
     @State private var promptPlaceholder: String
     @State private var undoStack: [String] = []
     @State private var redoStack: [String] = []
@@ -684,25 +627,27 @@ struct IOSQuickAddTaskCard: View {
             self._text = State(initialValue: item.block.content)
             self._scheduleDate = State(initialValue: item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: initialDate))
             self._repeatRule = State(initialValue: item.block.task?.repeatRule)
+            self._attachedImagesBase64 = State(initialValue: item.block.task?.attachedImagesBase64 ?? [])
         } else {
             self._text = State(initialValue: "")
             self._scheduleDate = State(initialValue: Calendar.current.startOfDay(for: initialDate))
             self._repeatRule = State(initialValue: nil)
+            self._attachedImagesBase64 = State(initialValue: [])
         }
     }
 
     private var isEditing: Bool { editingItem != nil }
 
-    private var resolvedAccent: Color {
-        let isDark: Bool = switch store.settings.appearanceMode {
+    private var isDarkMode: Bool {
+        switch store.settings.appearanceMode {
         case .system: systemColorScheme == .dark
         case .light: false
         case .dark: true
         }
-        if store.settings.accentColor == .graphite && isDark {
-            return Color(hex: "#F3F4F6")
-        }
-        return Color(hex: store.settings.accentColor.hex)
+    }
+
+    private var resolvedAccent: Color {
+        Color(hex: store.settings.accentColor.resolvedHex(isDark: isDarkMode))
     }
 
     private var dateLabel: String {
@@ -773,7 +718,6 @@ struct IOSQuickAddTaskCard: View {
                 .buttonStyle(RowePressScaleStyle())
             }
 
-            // Inline graphical calendar view (matching macOS calendar popover)
             if showCalendarPicker {
                 DatePicker(
                     "Schedule Date",
@@ -789,12 +733,12 @@ struct IOSQuickAddTaskCard: View {
                     withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                         showCalendarPicker = false
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { isFocused = true }
+                    isFocused = true
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
 
-            // 2. Task title with cycling conversational placeholder (no notes field)
+            // 2. Task title with cycling conversational placeholder
             TextField(promptPlaceholder, text: $text, axis: .vertical)
                 .focused($isFocused)
                 .font(.system(size: 17, weight: .medium))
@@ -808,140 +752,340 @@ struct IOSQuickAddTaskCard: View {
                     redoStack.removeAll()
                 }
 
-            // 3. Bottom row: Repeat (Daily / Weekly / Monthly), Undo/Delete, and Add/Done
-            HStack(spacing: 10) {
-                Menu {
-                    if repeatRule != nil {
-                        Button("Off", role: .destructive) {
-                            IOSHaptics.shared.tap()
-                            repeatRule = nil
-                        }
-                        Divider()
-                    }
-                    ForEach(allowedRepeats, id: \.self) { freq in
-                        Button {
-                            IOSHaptics.shared.tap()
-                            let weekday = Calendar.current.component(.weekday, from: scheduleDate)
-                            repeatRule = RepeatRule(
-                                frequency: freq,
-                                weekdayIndex: freq == .weekly ? weekday : nil,
-                                startDate: scheduleDate
-                            )
-                        } label: {
-                            Label(freq.rawValue, systemImage: repeatRule?.frequency == freq ? "checkmark" : "")
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "repeat")
-                            .font(.system(size: 13.5, weight: .medium))
-                        if let freq = repeatRule?.frequency {
-                            Text(freq.rawValue)
-                                .font(.system(size: 12.5, weight: .semibold))
-                        }
-                    }
-                    .foregroundStyle(repeatRule != nil ? resolvedAccent : .secondary)
-                    .padding(.horizontal, repeatRule != nil ? 11 : 0)
-                    .frame(minWidth: 32, minHeight: 32)
-                    .background(
-                        Capsule().fill(repeatRule != nil ? resolvedAccent.opacity(0.15) : Color.primary.opacity(0.06))
-                    )
-                }
-
-                if isEditing, let item = editingItem {
-                    Button(role: .destructive) {
-                        IOSHaptics.shared.errorBuzz()
-                        store.deleteBlock(in: item.documentId, blockId: item.block.id)
-                        onClose()
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.red)
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(Color.red.opacity(0.10)))
-                    }
-                    .buttonStyle(RowePressScaleStyle())
-                } else {
-                    Button {
-                        guard let prev = undoStack.popLast() else { return }
-                        IOSHaptics.shared.tap()
-                        isApplyingHistory = true
-                        redoStack.append(text)
-                        text = prev
-                        DispatchQueue.main.async { isApplyingHistory = false }
-                    } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 13.5, weight: .medium))
-                            .foregroundStyle(undoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
-                            .frame(width: 28, height: 28)
-                    }
-                    .disabled(undoStack.isEmpty)
-                    .buttonStyle(RowePressScaleStyle())
-
-                    Button {
-                        guard let next = redoStack.popLast() else { return }
-                        IOSHaptics.shared.tap()
-                        isApplyingHistory = true
-                        undoStack.append(text)
-                        text = next
-                        DispatchQueue.main.async { isApplyingHistory = false }
-                    } label: {
-                        Image(systemName: "arrow.uturn.forward")
-                            .font(.system(size: 13.5, weight: .medium))
-                            .foregroundStyle(redoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
-                            .frame(width: 28, height: 28)
-                    }
-                    .disabled(redoStack.isEmpty)
-                    .buttonStyle(RowePressScaleStyle())
-                }
-
-                Spacer()
-
-                Button {
-                    saveAndClose()
-                } label: {
-                    Text(isEditing ? "Done" : "Add")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(store.settings.accentColor == .graphite ? Color(uiColor: .systemBackground) : .white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 9)
-                        .background(Capsule().fill(resolvedAccent))
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(RowePressScaleStyle())
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if !attachedImagesBase64.isEmpty {
+                attachedPhotosStrip
             }
+
+            composerToolbar
         }
         .padding(18)
-        .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .onTapGesture {
-            if !showCalendarPicker { isFocused = true }
-        }
         .roweIOSGlassRoundedRect(radius: 24, interactive: true)
         .iosDragToDismiss(onDismiss: onClose)
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { isFocused = true }
+        .photosPicker(isPresented: $showPhotosPicker, selection: $selectedPhotoItem, matching: .images)
+        .sheet(isPresented: Binding(
+            get: { previewImageIndex != nil },
+            set: { if !$0 { previewImageIndex = nil; didCopyPreviewImage = false } }
+        )) {
+            if let idx = previewImageIndex, attachedImagesBase64.indices.contains(idx) {
+                imagePreviewSheet(index: idx, base64: attachedImagesBase64[idx])
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
         }
+        .onChange(of: selectedPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data),
+                   let encoded = Self.encodeCompressedBase64(img) {
+                    await MainActor.run {
+                        IOSHaptics.shared.tap()
+                        attachedImagesBase64.append(encoded)
+                        selectedPhotoItem = nil
+                    }
+                }
+            }
+        }
+        .onAppear {
+            isFocused = true
+        }
+    }
+
+    private var attachedPhotosStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Array(attachedImagesBase64.enumerated()), id: \.offset) { idx, b64 in
+                    HStack(spacing: 5) {
+                        Button {
+                            IOSHaptics.shared.tap()
+                            didCopyPreviewImage = false
+                            previewImageIndex = idx
+                        } label: {
+                            HStack(spacing: 5) {
+                                if let data = Data(base64Encoded: b64), let uiImg = UIImage(data: data) {
+                                    Image(uiImage: uiImg)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 20, height: 20)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                } else {
+                                    Image(systemName: "photo")
+                                        .font(.system(size: 11))
+                                }
+                                Text("#image \(idx + 1)")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            IOSHaptics.shared.tap()
+                            attachedImagesBase64.remove(at: idx)
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.primary.opacity(0.08)))
+                    .contextMenu {
+                        Button("Copy Image", systemImage: "doc.on.doc") {
+                            copyImage(at: idx)
+                        }
+                        Button("Preview", systemImage: "eye") {
+                            didCopyPreviewImage = false
+                            previewImageIndex = idx
+                        }
+                        Divider()
+                        Button("Remove", systemImage: "trash", role: .destructive) {
+                            IOSHaptics.shared.tap()
+                            attachedImagesBase64.remove(at: idx)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var composerToolbar: some View {
+        HStack(spacing: 10) {
+            Menu {
+                if repeatRule != nil {
+                    Button("Off", role: .destructive) {
+                        IOSHaptics.shared.tap()
+                        repeatRule = nil
+                    }
+                    Divider()
+                }
+                ForEach(allowedRepeats, id: \.self) { freq in
+                    Button {
+                        IOSHaptics.shared.tap()
+                        let weekday = Calendar.current.component(.weekday, from: scheduleDate)
+                        repeatRule = RepeatRule(
+                            frequency: freq,
+                            weekdayIndex: freq == .weekly ? weekday : nil,
+                            startDate: scheduleDate
+                        )
+                    } label: {
+                        Label(freq.rawValue, systemImage: repeatRule?.frequency == freq ? "checkmark" : "")
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 13.5, weight: .medium))
+                    if let freq = repeatRule?.frequency {
+                        Text(freq.rawValue)
+                            .font(.system(size: 12.5, weight: .semibold))
+                    }
+                }
+                .foregroundStyle(repeatRule != nil ? resolvedAccent : .secondary)
+                .padding(.horizontal, repeatRule != nil ? 11 : 0)
+                .frame(minWidth: 32, minHeight: 32)
+                .background(
+                    Capsule().fill(repeatRule != nil ? resolvedAccent.opacity(0.15) : Color.primary.opacity(0.06))
+                )
+            }
+
+            Menu {
+                Button("Paste Photo from Clipboard", systemImage: "doc.on.clipboard") {
+                    pasteClipboardImage()
+                }
+                Button("Choose from Photos…", systemImage: "photo.on.rectangle") {
+                    IOSHaptics.shared.tap()
+                    showPhotosPicker = true
+                }
+            } label: {
+                Image(systemName: attachedImagesBase64.isEmpty ? "photo.badge.plus" : "photo.fill")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(attachedImagesBase64.isEmpty ? .secondary : resolvedAccent)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle().fill(attachedImagesBase64.isEmpty ? Color.primary.opacity(0.06) : resolvedAccent.opacity(0.15))
+                    )
+            }
+
+            if isEditing, let item = editingItem {
+                Button(role: .destructive) {
+                    IOSHaptics.shared.errorBuzz()
+                    store.deleteBlock(in: item.documentId, blockId: item.block.id)
+                    onClose()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.red)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.red.opacity(0.10)))
+                }
+                .buttonStyle(RowePressScaleStyle())
+            } else {
+                Button {
+                    guard let prev = undoStack.popLast() else { return }
+                    IOSHaptics.shared.tap()
+                    isApplyingHistory = true
+                    redoStack.append(text)
+                    text = prev
+                    DispatchQueue.main.async { isApplyingHistory = false }
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(undoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
+                        .frame(width: 28, height: 28)
+                }
+                .disabled(undoStack.isEmpty)
+                .buttonStyle(RowePressScaleStyle())
+
+                Button {
+                    guard let next = redoStack.popLast() else { return }
+                    IOSHaptics.shared.tap()
+                    isApplyingHistory = true
+                    undoStack.append(text)
+                    text = next
+                    DispatchQueue.main.async { isApplyingHistory = false }
+                } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(redoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
+                        .frame(width: 28, height: 28)
+                }
+                .disabled(redoStack.isEmpty)
+                .buttonStyle(RowePressScaleStyle())
+            }
+
+            Spacer()
+
+            Button {
+                saveAndClose()
+            } label: {
+                Text(isEditing ? "Done" : "Add")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isDarkMode && store.settings.accentColor == .graphite ? Color.black : .white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(resolvedAccent))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(RowePressScaleStyle())
+            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachedImagesBase64.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private func imagePreviewSheet(index: Int, base64: String) -> some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                if let data = Data(base64Encoded: base64), let uiImg = UIImage(data: data) {
+                    Image(uiImage: uiImg)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ContentUnavailableView("Image Unavailable", systemImage: "photo")
+                }
+
+                HStack(spacing: 12) {
+                    Button {
+                        copyImage(at: index)
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            didCopyPreviewImage = true
+                        }
+                    } label: {
+                        Label(didCopyPreviewImage ? "Copied" : "Copy Image", systemImage: didCopyPreviewImage ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(resolvedAccent))
+                            .foregroundStyle(isDarkMode && store.settings.accentColor == .graphite ? Color.black : .white)
+                    }
+                    .buttonStyle(RowePressScaleStyle())
+
+                    Button(role: .destructive) {
+                        IOSHaptics.shared.tap()
+                        if attachedImagesBase64.indices.contains(index) {
+                            attachedImagesBase64.remove(at: index)
+                        }
+                        previewImageIndex = nil
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                            .font(.system(size: 15, weight: .semibold))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 11)
+                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.red.opacity(0.14)))
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(RowePressScaleStyle())
+                }
+            }
+            .padding(20)
+            .navigationTitle("#image \(index + 1)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { previewImageIndex = nil }
+                }
+            }
+        }
+    }
+
+    private func copyImage(at index: Int) {
+        guard attachedImagesBase64.indices.contains(index),
+              let data = Data(base64Encoded: attachedImagesBase64[index]),
+              let img = UIImage(data: data) else {
+            IOSHaptics.shared.errorBuzz()
+            return
+        }
+        IOSHaptics.shared.taskComplete()
+        UIPasteboard.general.image = img
+    }
+
+    private func pasteClipboardImage() {
+        guard let img = UIPasteboard.general.image,
+              let encoded = Self.encodeCompressedBase64(img) else {
+            IOSHaptics.shared.errorBuzz()
+            return
+        }
+        IOSHaptics.shared.tap()
+        attachedImagesBase64.append(encoded)
+    }
+
+    private static func encodeCompressedBase64(_ image: UIImage, maxDimension: CGFloat = 900) -> String? {
+        let orig = image.size
+        guard orig.width > 0, orig.height > 0 else { return nil }
+        let scale = min(1.0, maxDimension / max(orig.width, orig.height))
+        let target = CGSize(width: round(orig.width * scale), height: round(orig.height * scale))
+        let renderer = UIGraphicsImageRenderer(size: target)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+        return resized.jpegData(compressionQuality: 0.78)?.base64EncodedString()
     }
 
     private func saveAndClose() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !attachedImagesBase64.isEmpty else { return }
+        let finalTitle = trimmed.isEmpty ? "Image Task" : trimmed
         IOSHaptics.shared.taskComplete()
 
         if let item = editingItem {
             store.updateBlock(in: item.documentId, blockId: item.block.id) { block in
-                block.content = trimmed
+                block.content = finalTitle
                 var meta = block.task ?? TaskMetadata(isInbox: item.isInbox)
                 meta.scheduleDate = scheduleDate
                 meta.repeatRule = repeatRule
+                meta.attachedImagesBase64 = attachedImagesBase64
                 block.task = meta
             }
         } else {
             _ = store.addInboxTask(
-                title: trimmed,
+                title: finalTitle,
                 scheduleDate: scheduleDate,
-                repeatRule: repeatRule
+                repeatRule: repeatRule,
+                attachedImagesBase64: attachedImagesBase64
             )
         }
         onClose()
