@@ -756,6 +756,8 @@ private struct FlowChipStack: View {
                             Image(systemName: "xmark")
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(.secondary)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
                     }

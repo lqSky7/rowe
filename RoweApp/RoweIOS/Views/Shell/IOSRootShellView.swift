@@ -221,7 +221,7 @@ struct IOSRootShellView: View {
             IOSPinLockSheet(store: store, request: req) {
                 store.pinPromptRequest = nil
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.fraction(0.64), .large])
             .presentationCornerRadius(28)
         }
         .onChange(of: store.hasLoadedFromDisk) { _, loaded in

@@ -176,11 +176,16 @@ public final class MacFocusTracker {
                 }
             }
         } else {
-            detectedTarget = CanonicalTargetRegistry.canonicalSlug(
-                bundleId: bundleId,
-                appName: frontApp.localizedName,
-                customTargets: customTargets
-            )
+            let appLower = frontApp.localizedName?.lowercased() ?? ""
+            if allowlist.contains(appLower) || allowlist.contains(bundleId.lowercased()) {
+                detectedTarget = nil
+            } else {
+                detectedTarget = CanonicalTargetRegistry.canonicalSlug(
+                    bundleId: bundleId,
+                    appName: frontApp.localizedName,
+                    customTargets: customTargets
+                )
+            }
         }
 
         // Track YouTube /watch rapid-hopping vs focused lecture viewing

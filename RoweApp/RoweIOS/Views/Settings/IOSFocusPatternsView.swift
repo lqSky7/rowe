@@ -251,6 +251,14 @@ struct IOSFocusPatternsView: View {
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.tertiary)
                         }
+                        Button {
+                            IOSHaptics.shared.tap()
+                            store.removeFocusAllowlistedDomain(domain)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .onDelete { offsets in

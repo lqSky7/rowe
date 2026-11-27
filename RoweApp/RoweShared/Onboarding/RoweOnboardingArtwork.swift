@@ -306,7 +306,15 @@ public struct RoweAllowlistPreset: Identifiable, Hashable, Sendable {
         RoweAllowlistPreset(name: "Claude", domain: "claude.ai", icon: "brain.head.profile", category: "Workspace & AI"),
 
         // Video (if user wants to always allowlist)
-        RoweAllowlistPreset(name: "YouTube (Always Allow)", domain: "youtube.com", icon: "play.rectangle", category: "Media Exceptions")
+        RoweAllowlistPreset(name: "YouTube (Always Allow)", domain: "youtube.com", icon: "play.rectangle", category: "Media Exceptions"),
+
+        // Popular iOS & Mac Apps
+        RoweAllowlistPreset(name: "Discord", domain: "discord", icon: "bubble.left.and.bubble.right", category: "Apps"),
+        RoweAllowlistPreset(name: "Slack", domain: "slack", icon: "number", category: "Apps"),
+        RoweAllowlistPreset(name: "GoodNotes", domain: "goodnotes", icon: "pencil.and.outline", category: "Apps"),
+        RoweAllowlistPreset(name: "Obsidian", domain: "obsidian", icon: "diamond", category: "Apps"),
+        RoweAllowlistPreset(name: "Xcode", domain: "xcode", icon: "hammer.fill", category: "Apps"),
+        RoweAllowlistPreset(name: "Cursor", domain: "cursor", icon: "chevron.left.forwardslash.chevron.right", category: "Apps")
     ]
 
     public static func displayName(for domain: String) -> String {

@@ -303,122 +303,81 @@ public struct RoweOnboardingView: View {
     }
 
     private var permissionsSlideContent: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                RoweGlassGlowArtworkView(kind: .focusPermissions, size: 108, speed: 0.72, glow: 1.15)
-                    .padding(.top, 4)
-
-                VStack(spacing: 8) {
-                    Text("Adaptive Focus & Permissions")
-                        .font(.system(size: 25, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                        .multilineTextAlignment(.center)
-
-                    Text("Rowe observes your scroll rhythm silently, suggests a quick (≤ 25 min) unlocked task before long sessions, and never blocks apps or reads PIN-locked notes.")
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(2.5)
-                        .frame(maxWidth: 400)
-                }
-
-                VStack(spacing: 10) {
-                    permissionRow(
-                        icon: "bell.badge.fill",
-                        title: "Notifications",
-                        detail: "Used for calm, non-blocking task banners and daily reminders. Auto-mutes hours when you dismiss nudges.",
-                        isGranted: notificationsGranted,
-                        buttonTitle: "Allow"
-                    ) {
-                        requestNotifications()
-                    }
-
-                    #if os(macOS)
-                    permissionRow(
-                        icon: "hand.raised.fill",
-                        title: "Accessibility (Mac Activity)",
-                        detail: "Lets Rowe notice distraction apps & browser tabs locally. URLs are classified on-device and never stored.",
-                        isGranted: accessibilityGranted,
-                        buttonTitle: "Open Settings"
-                    ) {
-                        requestMacAccessibility()
-                    }
-                    #endif
-                }
-                .frame(maxWidth: 410)
-                .padding(.top, 2)
-
-                HStack(spacing: 6) {
-                    Image(systemName: "lock.shield")
-                        .font(.system(size: 11.5))
-                    Text("All permissions are optional and can be changed anytime in Focus Patterns.")
-                        .font(.system(size: 11.5))
-                }
-                .foregroundStyle(.tertiary)
-                .padding(.top, 2)
+        VStack(spacing: 22) {
+            ZStack {
+                RoweGlassGlowArtworkView(kind: .focusPermissions, size: 132, speed: 0.74, glow: 1.18)
+                    .id("art-\(step)")
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
-            .padding(.horizontal, 24)
+            .frame(height: 175)
+
+            VStack(spacing: 12) {
+                Text("Adaptive Focus")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+
+                Text("Observes scroll patterns locally to suggest a quick task before long sessions — never blocking apps or reading locked notes.")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .frame(maxWidth: 380)
+            }
+            .padding(.horizontal, 28)
+
+            HStack(spacing: 10) {
+                minimalPermissionPill(
+                    title: notificationsGranted ? "Notifications On" : "Allow Notifications",
+                    icon: notificationsGranted ? "checkmark" : "bell",
+                    isGranted: notificationsGranted
+                ) {
+                    requestNotifications()
+                }
+
+                #if os(macOS)
+                minimalPermissionPill(
+                    title: accessibilityGranted ? "Accessibility On" : "Enable Accessibility",
+                    icon: accessibilityGranted ? "checkmark" : "hand.raised",
+                    isGranted: accessibilityGranted
+                ) {
+                    requestMacAccessibility()
+                }
+                #endif
+            }
+            .padding(.top, 4)
         }
-        .scrollIndicators(.hidden)
         .onAppear { refreshPermissions() }
     }
 
-    private func permissionRow(
-        icon: String,
+    private func minimalPermissionPill(
         title: String,
-        detail: String,
+        icon: String,
         isGranted: Bool,
-        buttonTitle: String,
         action: @escaping () -> Void
     ) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(isGranted ? .green : .secondary)
-                .frame(width: 34, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(isGranted ? Color.green.opacity(0.12) : Color.primary.opacity(0.06))
-                )
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Spacer(minLength: 8)
-                    if isGranted {
-                        Label("Allowed", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(.green)
-                    } else {
-                        Button(buttonTitle, action: action)
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(Color.primary))
-                    }
-                }
-
-                Text(detail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(1.5)
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
             }
+            .foregroundStyle(isGranted ? .secondary : .primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(Color.primary.opacity(isGranted ? 0.05 : 0.09))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.primary.opacity(isGranted ? 0.07 : 0.14), lineWidth: 0.75)
+                    )
+            )
+            .contentShape(Capsule())
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75)
-                )
-        )
+        .buttonStyle(.plain)
+        .disabled(isGranted)
     }
 
     private func refreshPermissions() {

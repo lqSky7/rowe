@@ -60,6 +60,7 @@ struct CraftWindowShell: View {
                         ZStack(alignment: .trailing) {
                             leftSidebarContent
                                 .frame(width: appliedSidebarWidth)
+                                .background(MacSidebarBackdrop())
 
                             Rectangle()
                                 .fill(Color.clear)
@@ -436,6 +437,7 @@ private struct SidebarTwoFingerSwipeMonitor: NSViewRepresentable {
         private var monitor: Any?
         private var accumulatedX: CGFloat = 0
         private var didTriggerThisGesture = false
+        private var lastTriggerUptime: TimeInterval = 0
 
         /// Never intercept clicks, hovers, or drags — only measure bounds for the scrollWheel monitor.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -461,35 +463,39 @@ private struct SidebarTwoFingerSwipeMonitor: NSViewRepresentable {
 
         private func handleScroll(_ event: NSEvent) {
             guard event.window === self.window else { return }
-            let localPoint = convert(event.locationInWindow, from: nil)
-            guard bounds.contains(localPoint) else { return }
 
+            // Always reset gesture state even if fingers lifted outside sidebar bounds.
             if event.phase == .began {
                 accumulatedX = 0
                 didTriggerThisGesture = false
-            }
-
-            if event.phase == .ended || event.phase == .cancelled {
+            } else if event.phase == .ended || event.phase == .cancelled {
                 accumulatedX = 0
                 didTriggerThisGesture = false
                 return
             }
 
+            let localPoint = convert(event.locationInWindow, from: nil)
+            guard bounds.contains(localPoint) else { return }
+
             // Ignore inertia/momentum phase so a single swipe never double-flips.
             guard event.momentumPhase.isEmpty, !didTriggerThisGesture else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - lastTriggerUptime > 0.35 else { return }
 
             let dx = event.scrollingDeltaX
             let dy = event.scrollingDeltaY
-            guard abs(dx) > abs(dy) * 1.25 else { return }
+            guard abs(dx) > abs(dy) * 1.15 else { return }
 
             accumulatedX += dx
-            let threshold: CGFloat = 24
+            let threshold: CGFloat = 20
             if accumulatedX >= threshold {
                 didTriggerThisGesture = true
+                lastTriggerUptime = now
                 accumulatedX = 0
                 onSwipeToWorkspace?()
             } else if accumulatedX <= -threshold {
                 didTriggerThisGesture = true
+                lastTriggerUptime = now
                 accumulatedX = 0
                 onSwipeToDocument?()
             }

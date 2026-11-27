@@ -578,10 +578,11 @@ public struct FocusBehaviorState: Codable, Hashable, Sendable {
             }
         }
 
-        let mergedAllow = Set(allowlistedDomains).union(remote.allowlistedDomains)
-        allowlistedDomains = Array(mergedAllow).sorted()
-        let mergedCustom = Set(customDistractionTargets).union(remote.customDistractionTargets)
-        customDistractionTargets = Array(mergedCustom).sorted()
+        // Last-Write-Wins for allowlist & custom targets so deleting an item never resurrects from remote.
+        if remote.updatedAt > updatedAt {
+            allowlistedDomains = Array(Set(remote.allowlistedDomains)).sorted()
+            customDistractionTargets = Array(Set(remote.customDistractionTargets)).sorted()
+        }
         updatedAt = max(updatedAt, remote.updatedAt)
     }
 }

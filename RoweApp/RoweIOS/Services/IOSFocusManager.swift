@@ -84,6 +84,10 @@ public final class IOSFocusManager: NSObject, UNUserNotificationCenterDelegate {
     /// Called by `RoweAppOpenedIntent` when the user opens a tracked app on iOS.
     public func handleAppOpened(appName: String, at now: Date = Date()) async {
         guard let store, store.focusBehavior.isEnabled else { return }
+        let allowlist = Set(store.focusBehavior.allowlistedDomains.map { $0.lowercased() })
+        if allowlist.contains(appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+            return
+        }
         guard let slug = CanonicalTargetRegistry.canonicalSlug(
             appName: appName,
             customTargets: store.focusBehavior.customDistractionTargets
