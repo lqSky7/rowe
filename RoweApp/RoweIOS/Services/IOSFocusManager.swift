@@ -3,24 +3,25 @@ import FamilyControls
 import Foundation
 import ManagedSettings
 import Observation
+import SwiftUI
 import UserNotifications
 import RoweCore
 
 public extension DeviceActivityName {
-    static let roweDailyFocus = Self("com.rowe.focus.daily")
+    static var roweDailyFocus: Self { Self("com.rowe.focus.daily") }
 }
 
 public extension DeviceActivityEvent.Name {
-    static let threshold1m = Self("com.rowe.focus.t1m")
-    static let threshold5m = Self("com.rowe.focus.t5m")
-    static let threshold15m = Self("com.rowe.focus.t15m")
-    static let threshold30m = Self("com.rowe.focus.t30m")
-    static let threshold45m = Self("com.rowe.focus.t45m")
-    static let threshold60m = Self("com.rowe.focus.t60m")
+    static var threshold1m: Self { Self("com.rowe.focus.t1m") }
+    static var threshold5m: Self { Self("com.rowe.focus.t5m") }
+    static var threshold15m: Self { Self("com.rowe.focus.t15m") }
+    static var threshold30m: Self { Self("com.rowe.focus.t30m") }
+    static var threshold45m: Self { Self("com.rowe.focus.t45m") }
+    static var threshold60m: Self { Self("com.rowe.focus.t60m") }
 }
 
 public extension DeviceActivityReport.Context {
-    static let roweCircadianHistory = Self("com.rowe.focus.circadianHistory")
+    static var roweCircadianHistory: Self { Self("com.rowe.focus.circadianHistory") }
 }
 
 /// 100% Native Apple Screen Time (`FamilyControls` + `DeviceActivity`) manager for Rowe on iOS.
