@@ -638,20 +638,30 @@ struct IOSTaskRow: View {
     }
 }
 
-/// Unified compact floating Task Composer (used for BOTH creating and editing tasks),
-/// with built-in Date, Deadline, Repeat, Reminder, Notes, and Undo/Delete controls.
+/// Unified compact floating Task Composer (used for BOTH creating and editing tasks):
+/// 1. Schedule date: Today, Tomorrow, or Open Calendar (inline graphical calendar)
+/// 2. Cycling conversational prompt ("What dya wanna do today?")
+/// 3. Repeat: Daily, Weekly, Monthly (plus Undo/Redo or Delete, and Add/Done)
 struct IOSQuickAddTaskCard: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @Bindable var store: WorkspaceStore
     let editingItem: ResolvedTaskItem?
     var onClose: () -> Void
 
+    private static let prompts: [String] = [
+        "What dya wanna do today?",
+        "What's next on your mind?",
+        "Something quick to knock out?",
+        "What are we getting done?",
+        "Capture it before it slips…"
+    ]
+    @MainActor private static var promptCursor: Int = 0
+
     @State private var text: String
-    @State private var notes: String
-    @State private var scheduleDate: Date?
-    @State private var deadlineDate: Date?
+    @State private var scheduleDate: Date
     @State private var repeatRule: RepeatRule?
-    @State private var reminderDate: Date?
+    @State private var showCalendarPicker: Bool = false
+    @State private var promptPlaceholder: String
     @State private var undoStack: [String] = []
     @State private var redoStack: [String] = []
     @State private var isApplyingHistory = false
@@ -666,20 +676,18 @@ struct IOSQuickAddTaskCard: View {
         self.store = store
         self.editingItem = editingItem
         self.onClose = onClose
+        let idx = Self.promptCursor % Self.prompts.count
+        Self.promptCursor += 1
+        self._promptPlaceholder = State(initialValue: Self.prompts[idx])
+
         if let item = editingItem {
             self._text = State(initialValue: item.block.content)
-            self._notes = State(initialValue: item.block.task?.notes ?? "")
-            self._scheduleDate = State(initialValue: item.block.task?.scheduleDate)
-            self._deadlineDate = State(initialValue: item.block.task?.deadlineDate)
+            self._scheduleDate = State(initialValue: item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: initialDate))
             self._repeatRule = State(initialValue: item.block.task?.repeatRule)
-            self._reminderDate = State(initialValue: item.block.task?.reminderDate)
         } else {
             self._text = State(initialValue: "")
-            self._notes = State(initialValue: "")
             self._scheduleDate = State(initialValue: Calendar.current.startOfDay(for: initialDate))
-            self._deadlineDate = State(initialValue: nil)
             self._repeatRule = State(initialValue: nil)
-            self._reminderDate = State(initialValue: nil)
         }
     }
 
@@ -698,36 +706,46 @@ struct IOSQuickAddTaskCard: View {
     }
 
     private var dateLabel: String {
-        guard let d = scheduleDate else { return "No Date" }
-        if Calendar.current.isDateInToday(d) { return "Today" }
-        if Calendar.current.isDateInTomorrow(d) { return "Tomorrow" }
-        return d.formatted(.dateTime.month(.abbreviated).day())
+        if Calendar.current.isDateInToday(scheduleDate) { return "Today" }
+        if Calendar.current.isDateInTomorrow(scheduleDate) { return "Tomorrow" }
+        return scheduleDate.formatted(.dateTime.month(.abbreviated).day())
     }
 
+    private let allowedRepeats: [RepeatFrequency] = [.daily, .weekly, .monthly]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Top bar: Date selector + Close
+        VStack(alignment: .leading, spacing: 14) {
+            // 1. Top bar: When to schedule (Today, Tomorrow, Open Calendar) + Close
             HStack {
                 Menu {
                     Button("Today", systemImage: "sun.max") {
+                        IOSHaptics.shared.tap()
                         scheduleDate = Calendar.current.startOfDay(for: Date())
+                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                            showCalendarPicker = false
+                        }
                     }
                     Button("Tomorrow", systemImage: "sunrise") {
-                        scheduleDate = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))
-                    }
-                    Button("Next Week", systemImage: "calendar.badge.plus") {
-                        scheduleDate = Calendar.current.date(byAdding: .day, value: 7, to: Calendar.current.startOfDay(for: Date()))
+                        IOSHaptics.shared.tap()
+                        scheduleDate = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                            showCalendarPicker = false
+                        }
                     }
                     Divider()
-                    Button("No Date", systemImage: "calendar.badge.minus", role: .destructive) {
-                        scheduleDate = nil
-                        repeatRule = nil
+                    Button("Open Calendar…", systemImage: "calendar") {
+                        IOSHaptics.shared.tap()
+                        IOSKeyboard.dismiss()
+                        isFocused = false
+                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                            showCalendarPicker.toggle()
+                        }
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
                             .font(.system(size: 14))
-                            .foregroundStyle(scheduleDate != nil ? resolvedAccent : .secondary)
+                            .foregroundStyle(resolvedAccent)
                         Text(dateLabel)
                             .font(.system(size: 15, weight: .medium))
                             .contentTransition(.numericText())
@@ -755,105 +773,79 @@ struct IOSQuickAddTaskCard: View {
                 .buttonStyle(RowePressScaleStyle())
             }
 
-            // Title & compact optional Notes
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("New task…", text: $text, axis: .vertical)
-                    .focused($isFocused)
-                    .font(.system(size: 17, weight: .medium))
-                    .lineLimit(1...4)
-                    .submitLabel(.done)
-                    .onSubmit { saveAndClose() }
-                    .onChange(of: text) { oldValue, newValue in
-                        guard !isApplyingHistory, oldValue != newValue else { return }
-                        undoStack.append(oldValue)
-                        if undoStack.count > 40 { undoStack.removeFirst() }
-                        redoStack.removeAll()
+            // Inline graphical calendar view (matching macOS calendar popover)
+            if showCalendarPicker {
+                DatePicker(
+                    "Schedule Date",
+                    selection: $scheduleDate,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .tint(resolvedAccent)
+                .onChange(of: scheduleDate) { _, newDate in
+                    IOSHaptics.shared.tap()
+                    scheduleDate = Calendar.current.startOfDay(for: newDate)
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        showCalendarPicker = false
                     }
-
-                TextField("Add notes…", text: $notes, axis: .vertical)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1...3)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { isFocused = true }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
 
-            // Built-in Deadline, Repeat, Reminder, Undo/Delete & Save row
-            HStack(spacing: 10) {
-                // Deadline picker
-                Menu {
-                    Button("Today", systemImage: "flag") {
-                        deadlineDate = Calendar.current.startOfDay(for: Date())
-                    }
-                    Button("Tomorrow", systemImage: "flag") {
-                        deadlineDate = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))
-                    }
-                    Button("Next Week", systemImage: "flag") {
-                        deadlineDate = Calendar.current.date(byAdding: .day, value: 7, to: Calendar.current.startOfDay(for: Date()))
-                    }
-                    if deadlineDate != nil {
-                        Divider()
-                        Button("Clear Deadline", systemImage: "xmark", role: .destructive) {
-                            deadlineDate = nil
-                        }
-                    }
-                } label: {
-                    Image(systemName: deadlineDate != nil ? "flag.fill" : "flag")
-                        .font(.system(size: 14.5, weight: .medium))
-                        .foregroundStyle(deadlineDate != nil ? .orange : .secondary)
-                        .frame(width: 32, height: 32)
-                        .background(
-                            Circle().fill(deadlineDate != nil ? Color.orange.opacity(0.15) : Color.primary.opacity(0.06))
-                        )
+            // 2. Task title with cycling conversational placeholder (no notes field)
+            TextField(promptPlaceholder, text: $text, axis: .vertical)
+                .focused($isFocused)
+                .font(.system(size: 17, weight: .medium))
+                .lineLimit(1...4)
+                .submitLabel(.done)
+                .onSubmit { saveAndClose() }
+                .onChange(of: text) { oldValue, newValue in
+                    guard !isApplyingHistory, oldValue != newValue else { return }
+                    undoStack.append(oldValue)
+                    if undoStack.count > 40 { undoStack.removeFirst() }
+                    redoStack.removeAll()
                 }
 
-                // Repeat picker
+            // 3. Bottom row: Repeat (Daily / Weekly / Monthly), Undo/Delete, and Add/Done
+            HStack(spacing: 10) {
                 Menu {
-                    Button("None") { repeatRule = nil }
-                    ForEach(RepeatFrequency.allCases, id: \.self) { freq in
+                    if repeatRule != nil {
+                        Button("Off", role: .destructive) {
+                            IOSHaptics.shared.tap()
+                            repeatRule = nil
+                        }
+                        Divider()
+                    }
+                    ForEach(allowedRepeats, id: \.self) { freq in
                         Button {
-                            let start = scheduleDate ?? Calendar.current.startOfDay(for: Date())
-                            scheduleDate = start
-                            let weekday = Calendar.current.component(.weekday, from: start)
-                            repeatRule = RepeatRule(frequency: freq, weekdayIndex: freq == .weekly ? weekday : nil, startDate: start)
+                            IOSHaptics.shared.tap()
+                            let weekday = Calendar.current.component(.weekday, from: scheduleDate)
+                            repeatRule = RepeatRule(
+                                frequency: freq,
+                                weekdayIndex: freq == .weekly ? weekday : nil,
+                                startDate: scheduleDate
+                            )
                         } label: {
                             Label(freq.rawValue, systemImage: repeatRule?.frequency == freq ? "checkmark" : "")
                         }
                     }
                 } label: {
-                    Image(systemName: "repeat")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(repeatRule != nil ? resolvedAccent : .secondary)
-                        .frame(width: 32, height: 32)
-                        .background(
-                            Circle().fill(repeatRule != nil ? resolvedAccent.opacity(0.15) : Color.primary.opacity(0.06))
-                        )
-                }
-
-                // Reminder picker
-                Menu {
-                    Button("In 1 Hour", systemImage: "clock") {
-                        reminderDate = Date().addingTimeInterval(3600)
-                    }
-                    Button("Tonight (6:00 PM)", systemImage: "moon") {
-                        reminderDate = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
-                    }
-                    Button("Tomorrow (9:00 AM)", systemImage: "sunrise") {
-                        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-                        reminderDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
-                    }
-                    if reminderDate != nil {
-                        Divider()
-                        Button("Clear Reminder", systemImage: "bell.slash", role: .destructive) {
-                            reminderDate = nil
+                    HStack(spacing: 5) {
+                        Image(systemName: "repeat")
+                            .font(.system(size: 13.5, weight: .medium))
+                        if let freq = repeatRule?.frequency {
+                            Text(freq.rawValue)
+                                .font(.system(size: 12.5, weight: .semibold))
                         }
                     }
-                } label: {
-                    Image(systemName: reminderDate != nil ? "alarm.fill" : "alarm")
-                        .font(.system(size: 14.5, weight: .medium))
-                        .foregroundStyle(reminderDate != nil ? resolvedAccent : .secondary)
-                        .frame(width: 32, height: 32)
-                        .background(
-                            Circle().fill(reminderDate != nil ? resolvedAccent.opacity(0.15) : Color.primary.opacity(0.06))
-                        )
+                    .foregroundStyle(repeatRule != nil ? resolvedAccent : .secondary)
+                    .padding(.horizontal, repeatRule != nil ? 11 : 0)
+                    .frame(minWidth: 32, minHeight: 32)
+                    .background(
+                        Capsule().fill(repeatRule != nil ? resolvedAccent.opacity(0.15) : Color.primary.opacity(0.06))
+                    )
                 }
 
                 if isEditing, let item = editingItem {
@@ -923,7 +915,7 @@ struct IOSQuickAddTaskCard: View {
         .padding(18)
         .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .onTapGesture {
-            isFocused = true
+            if !showCalendarPicker { isFocused = true }
         }
         .roweIOSGlassRoundedRect(radius: 24, interactive: true)
         .iosDragToDismiss(onDismiss: onClose)
@@ -935,33 +927,22 @@ struct IOSQuickAddTaskCard: View {
     private func saveAndClose() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         IOSHaptics.shared.taskComplete()
 
         if let item = editingItem {
             store.updateBlock(in: item.documentId, blockId: item.block.id) { block in
                 block.content = trimmed
                 var meta = block.task ?? TaskMetadata(isInbox: item.isInbox)
-                meta.notes = trimmedNotes
                 meta.scheduleDate = scheduleDate
-                meta.deadlineDate = deadlineDate
                 meta.repeatRule = repeatRule
-                meta.reminderDate = reminderDate
                 block.task = meta
             }
         } else {
-            let created = store.addInboxTask(
+            _ = store.addInboxTask(
                 title: trimmed,
                 scheduleDate: scheduleDate,
-                deadlineDate: deadlineDate,
                 repeatRule: repeatRule
             )
-            if !trimmedNotes.isEmpty || reminderDate != nil {
-                store.updateBlock(in: created.documentId, blockId: created.block.id) { block in
-                    block.task?.notes = trimmedNotes
-                    block.task?.reminderDate = reminderDate
-                }
-            }
         }
         onClose()
     }

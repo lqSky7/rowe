@@ -131,7 +131,7 @@ struct IOSRootShellView: View {
                     }
                 }
                 .padding(.trailing, 18)
-                .padding(.bottom, 17)
+                .padding(.bottom, 20)
                 .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
