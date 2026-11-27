@@ -120,10 +120,11 @@ func RequireAuth(jwtSecret []byte) func(http.Handler) http.Handler {
 
 // RateLimiter implements a lightweight per-IP sliding token bucket to protect auth & vault endpoints.
 type RateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*tokenBucket
-	rate    float64
-	burst   float64
+	mu        sync.Mutex
+	buckets   map[string]*tokenBucket
+	rate      float64
+	burst     float64
+	lastPrune time.Time
 }
 
 type tokenBucket struct {
@@ -133,9 +134,10 @@ type tokenBucket struct {
 
 func NewRateLimiter(requestsPerMinute int) *RateLimiter {
 	rl := &RateLimiter{
-		buckets: make(map[string]*tokenBucket),
-		rate:    float64(requestsPerMinute) / 60.0,
-		burst:   float64(requestsPerMinute),
+		buckets:   make(map[string]*tokenBucket),
+		rate:      float64(requestsPerMinute) / 60.0,
+		burst:     float64(requestsPerMinute),
+		lastPrune: time.Now(),
 	}
 	return rl
 }
@@ -157,6 +159,15 @@ func (rl *RateLimiter) allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	now := time.Now()
+	// Periodically evict stale IP buckets (idle > 10m) to bound memory usage.
+	if now.Sub(rl.lastPrune) >= 5*time.Minute {
+		for k, bucket := range rl.buckets {
+			if now.Sub(bucket.lastSeen) > 10*time.Minute {
+				delete(rl.buckets, k)
+			}
+		}
+		rl.lastPrune = now
+	}
 	b, ok := rl.buckets[key]
 	if !ok {
 		rl.buckets[key] = &tokenBucket{tokens: rl.burst - 1, lastSeen: now}

@@ -56,7 +56,7 @@ func (h *SyncHandler) Push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	saved := make([]model.SyncDocument, 0, len(req.Documents))
+	toSave := make([]model.SyncDocument, 0, len(req.Documents))
 	for i := range req.Documents {
 		doc := req.Documents[i]
 		if doc.ID == "" {
@@ -72,19 +72,24 @@ func (h *SyncHandler) Push(w http.ResponseWriter, r *http.Request) {
 			// Enforce zero-knowledge: strip any accidental plaintext payload before persistence.
 			doc.PayloadJSON = ""
 		}
-		out, err := h.store.UpsertDocument(r.Context(), &doc)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to sync document "+doc.ID)
-			return
-		}
-		saved = append(saved, *out)
+		toSave = append(toSave, doc)
+	}
+
+	saved, err := h.store.UpsertDocumentsBatch(r.Context(), toSave)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to sync document batch")
+		return
 	}
 
 	nowMs := time.Now().UTC().UnixMilli()
 	if len(saved) > 0 && h.hub != nil {
+		evtDocID := ""
+		if len(saved) == 1 {
+			evtDocID = saved[0].ID
+		}
 		h.hub.Publish(userID, SyncEvent{
 			Type:       "doc.updated",
-			DocID:      saved[0].ID,
+			DocID:      evtDocID,
 			ServerTime: nowMs,
 		})
 	}

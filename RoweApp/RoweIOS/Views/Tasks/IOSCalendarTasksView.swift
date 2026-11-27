@@ -209,6 +209,8 @@ struct IOSCalendarTasksView: View {
                 VStack(spacing: 2) {
                     ForEach(pendingTasks) { item in
                         let isDownsynced = downsyncWaveCoordinator?.highlightedTaskIds.contains(item.block.id) == true
+                        let isHiddenForReveal = downsyncWaveCoordinator?.shouldHidePendingReveal(item.block.id) == true
+                        let isHidden = (flightCoordinator?.shouldHideRow(item.block.id) == true) || isHiddenForReveal
                         IOSTaskRow(store: store, item: item, onSelectTask: {
                             IOSHaptics.shared.tap()
                             onEditTask(item)
@@ -220,13 +222,13 @@ struct IOSCalendarTasksView: View {
                             triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
                             isDarkMode: colorScheme == .dark
                         )
-                        .opacity(flightCoordinator?.shouldHideRow(item.block.id) == true ? 0 : 1)
+                        .opacity(isHidden ? 0 : 1)
                         .onGeometryChange(for: CGRect.self) { proxy in
                             proxy.frame(in: .global)
                         } action: { frame in
                             flightCoordinator?.reportRowFrame(frame, for: item.block.id)
                         }
-                        .transition(isDownsynced ? .opacity : .roweUnblur)
+                        .transition((isDownsynced || isHiddenForReveal) ? .opacity : .roweUnblur)
                     }
                 }
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pendingTasks.map(\.id))
@@ -306,6 +308,8 @@ struct IOSCalendarTasksView: View {
             } else {
                 ForEach(pending) { item in
                     let isDownsynced = downsyncWaveCoordinator?.highlightedTaskIds.contains(item.block.id) == true
+                    let isHiddenForReveal = downsyncWaveCoordinator?.shouldHidePendingReveal(item.block.id) == true
+                    let isHidden = (flightCoordinator?.shouldHideRow(item.block.id) == true) || isHiddenForReveal
                     IOSTaskRow(store: store, item: item, onSelectTask: {
                         IOSHaptics.shared.tap()
                         onEditTask(item)
@@ -317,13 +321,13 @@ struct IOSCalendarTasksView: View {
                         triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
                         isDarkMode: colorScheme == .dark
                     )
-                    .opacity(flightCoordinator?.shouldHideRow(item.block.id) == true ? 0 : 1)
+                    .opacity(isHidden ? 0 : 1)
                     .onGeometryChange(for: CGRect.self) { proxy in
                         proxy.frame(in: .global)
                     } action: { frame in
                         flightCoordinator?.reportRowFrame(frame, for: item.block.id)
                     }
-                    .transition(isDownsynced ? .opacity : .roweUnblur)
+                    .transition((isDownsynced || isHiddenForReveal) ? .opacity : .roweUnblur)
                 }
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pending.map(\.id))
             }
@@ -1162,26 +1166,8 @@ struct IOSQuickAddTaskCard: View {
                 meta.attachedImagesBase64 = attachedImagesBase64
                 block.task = meta
             }
-            if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation, let onCreatedTaskForFlight {
-                var updatedBlock = item.block
-                updatedBlock.content = finalTitle
-                var meta = updatedBlock.task ?? TaskMetadata(isInbox: item.isInbox)
-                meta.scheduleDate = scheduleDate
-                meta.repeatRule = repeatRule
-                meta.attachedImagesBase64 = attachedImagesBase64
-                updatedBlock.task = meta
-                let updatedItem = ResolvedTaskItem(
-                    block: updatedBlock,
-                    documentId: item.documentId,
-                    documentTitle: item.documentTitle,
-                    isInbox: item.isInbox
-                )
-                IOSHaptics.shared.tap()
-                onCreatedTaskForFlight(updatedItem, textFieldFrame, cardFrame)
-            } else {
-                IOSHaptics.shared.taskComplete()
-                onClose()
-            }
+            IOSHaptics.shared.taskComplete()
+            onClose()
         } else {
             let created = store.addInboxTask(
                 title: finalTitle,

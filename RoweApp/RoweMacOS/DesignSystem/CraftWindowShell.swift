@@ -247,6 +247,18 @@ struct CraftWindowShell: View {
                 showOnboarding = !completed
             }
         }
+        .onChange(of: store.isSyncing) { _, syncing in
+            guard store.isSignedIn,
+                  !store.settings.reduceAnimations,
+                  store.settings.crazySyncAnimation else { return }
+            if syncing {
+                // Never fire the sync shader during a local task upsync or active bubble flight
+                guard !store.hasPendingCloudSync, taskFlightCoordinator.activeFlight == nil else { return }
+                downsyncWaveCoordinator.beginConverging(isDarkMode: isDarkAppearance)
+            } else {
+                downsyncWaveCoordinator.finishConvergingIfIdle()
+            }
+        }
         .onChange(of: store.downsyncWaveId) { _, _ in
             guard !store.settings.reduceAnimations,
                   store.settings.crazySyncAnimation,

@@ -91,6 +91,7 @@ func (s *SQLiteStore) migrate() error {
 	}
 	_ = s.db.exec(`ALTER TABLE users ADD COLUMN avatar_base64 TEXT NOT NULL DEFAULT ''`)
 	_ = s.db.exec(`ALTER TABLE users ADD COLUMN avatar_mime TEXT NOT NULL DEFAULT ''`)
+	_ = s.db.exec(`DELETE FROM refresh_sessions WHERE expires_at < ?`, time.Now().UTC().UnixMilli())
 	return nil
 }
 
@@ -196,6 +197,8 @@ func (s *SQLiteStore) UpdateUserAvatar(_ context.Context, userID, avatarBase64, 
 // MARK: - Refresh Sessions
 
 func (s *SQLiteStore) CreateRefreshSession(_ context.Context, sess *model.RefreshSession) error {
+	// Prune expired sessions so refresh_sessions never grows unbounded.
+	_ = s.db.exec(`DELETE FROM refresh_sessions WHERE expires_at < ?`, time.Now().UTC().UnixMilli())
 	return s.db.exec(
 		`INSERT INTO refresh_sessions (id, user_id, token_hash, device, expires_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -328,6 +331,74 @@ func (s *SQLiteStore) UpsertDocument(_ context.Context, doc *model.SyncDocument)
 		return nil, err
 	}
 	return s.GetDocument(context.Background(), doc.UserID, doc.ID)
+}
+
+// UpsertDocumentsBatch atomically upserts all documents in a single SQLite transaction.
+func (s *SQLiteStore) UpsertDocumentsBatch(_ context.Context, docs []model.SyncDocument) ([]model.SyncDocument, error) {
+	saved := make([]model.SyncDocument, 0, len(docs))
+	if len(docs) == 0 {
+		return saved, nil
+	}
+	nowMs := time.Now().UTC().UnixMilli()
+	err := s.db.withTx(func() error {
+		for i := range docs {
+			doc := docs[i]
+			if doc.IsLocked {
+				doc.PayloadJSON = ""
+			}
+			var deletedArg any = nil
+			if doc.DeletedAt != nil {
+				deletedArg = doc.DeletedAt.UTC().UnixMilli()
+			}
+			if err := s.db.execLocked(
+				`INSERT INTO documents (
+					id, user_id, space_id, folder_id, title, is_locked,
+					payload_json, encrypted_payload, is_starred, is_trashed,
+					version, updated_at, deleted_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(user_id, id) DO UPDATE SET
+					space_id = excluded.space_id,
+					folder_id = excluded.folder_id,
+					title = excluded.title,
+					is_locked = excluded.is_locked,
+					payload_json = excluded.payload_json,
+					encrypted_payload = excluded.encrypted_payload,
+					is_starred = excluded.is_starred,
+					is_trashed = excluded.is_trashed,
+					version = documents.version + 1,
+					updated_at = excluded.updated_at,
+					deleted_at = excluded.deleted_at`,
+				doc.ID, doc.UserID, doc.SpaceID, doc.FolderID, doc.Title, doc.IsLocked,
+				doc.PayloadJSON, doc.EncryptedPayload, doc.IsStarred, doc.IsTrashed,
+				max64(1, doc.Version), nowMs, deletedArg,
+			); err != nil {
+				return err
+			}
+			var out *model.SyncDocument
+			if err := s.db.queryRowsLocked(
+				`SELECT id, user_id, space_id, folder_id, title, is_locked,
+				        payload_json, encrypted_payload, is_starred, is_trashed,
+				        version, updated_at, deleted_at
+				 FROM documents WHERE user_id = ? AND id = ? LIMIT 1`,
+				[]any{doc.UserID, doc.ID},
+				func(cols []any) error {
+					d := scanDocument(cols)
+					out = &d
+					return nil
+				},
+			); err != nil {
+				return err
+			}
+			if out != nil {
+				saved = append(saved, *out)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
 }
 
 func (s *SQLiteStore) GetDocument(_ context.Context, userID, docID string) (*model.SyncDocument, error) {

@@ -80,6 +80,10 @@ func (s *sqliteDB) close() error {
 func (s *sqliteDB) exec(query string, args ...any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.execLocked(query, args...)
+}
+
+func (s *sqliteDB) execLocked(query string, args ...any) error {
 	if s.db == nil {
 		return errors.New("database closed")
 	}
@@ -97,10 +101,36 @@ func (s *sqliteDB) exec(query string, args ...any) error {
 	return nil
 }
 
+// withTx executes fn inside an atomic SQLite transaction (BEGIN IMMEDIATE / COMMIT / ROLLBACK)
+// while holding the database mutex so concurrent callers never interleave statements inside the tx.
+func (s *sqliteDB) withTx(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("database closed")
+	}
+	if err := s.execLocked("BEGIN IMMEDIATE;"); err != nil {
+		return err
+	}
+	if err := fn(); err != nil {
+		_ = s.execLocked("ROLLBACK;")
+		return err
+	}
+	if err := s.execLocked("COMMIT;"); err != nil {
+		_ = s.execLocked("ROLLBACK;")
+		return err
+	}
+	return nil
+}
+
 // queryRows runs a SELECT statement and invokes scan(rowValues) for every returned row.
 func (s *sqliteDB) queryRows(query string, args []any, scan func(cols []any) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.queryRowsLocked(query, args, scan)
+}
+
+func (s *sqliteDB) queryRowsLocked(query string, args []any, scan func(cols []any) error) error {
 	if s.db == nil {
 		return errors.New("database closed")
 	}

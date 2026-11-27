@@ -29,7 +29,10 @@ final class IOSDownsyncWaveCoordinator {
     @ObservationIgnored private var revealTask: Task<Void, Never>?
     @ObservationIgnored private var cleanupTask: Task<Void, Never>?
     @ObservationIgnored private var lastConvergeTriggerAt: Date = .distantPast
+    @ObservationIgnored private var lastExpandTriggerAt: Date = .distantPast
 
+    static let convergeCooldown: TimeInterval = 12.0
+    static let expandCooldown: TimeInterval = 6.0
     static let convergeDuration: TimeInterval = 0.56
     static let convergeFadeOutDuration: TimeInterval = 0.34
     static let waveDuration: TimeInterval = 1.05
@@ -46,7 +49,8 @@ final class IOSDownsyncWaveCoordinator {
         if case .expanding = activePhase { return }
         if !pendingRevealTaskIds.isEmpty { return }
         let now = Date()
-        guard now.timeIntervalSince(lastConvergeTriggerAt) > 1.2 else { return }
+        guard now.timeIntervalSince(lastConvergeTriggerAt) >= Self.convergeCooldown,
+              now.timeIntervalSince(lastExpandTriggerAt) >= Self.convergeCooldown else { return }
         lastConvergeTriggerAt = now
 
         cleanupTask?.cancel()
@@ -100,6 +104,10 @@ final class IOSDownsyncWaveCoordinator {
         sourceView: UIView?
     ) {
         guard !taskIds.isEmpty else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastExpandTriggerAt) >= Self.expandCooldown else { return }
+        lastExpandTriggerAt = now
+        lastConvergeTriggerAt = now
         launchTask?.cancel()
         revealTask?.cancel()
         cleanupTask?.cancel()

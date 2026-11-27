@@ -15,6 +15,7 @@ public struct WorkspaceSnapshot: Codable, Sendable {
     public var serverURL: String?
     public var lastSyncServerTimeMs: Int64
     public var dirtyDocumentIds: [String]
+    public var pendingRemoteDeleteIds: [String]
     public var focusBehavior: FocusBehaviorState
 
     public init(
@@ -32,6 +33,7 @@ public struct WorkspaceSnapshot: Codable, Sendable {
         serverURL: String? = nil,
         lastSyncServerTimeMs: Int64 = 0,
         dirtyDocumentIds: [String] = [],
+        pendingRemoteDeleteIds: [String] = [],
         focusBehavior: FocusBehaviorState = FocusBehaviorState()
     ) {
         self.schemaVersion = schemaVersion
@@ -48,12 +50,13 @@ public struct WorkspaceSnapshot: Codable, Sendable {
         self.serverURL = serverURL
         self.lastSyncServerTimeMs = lastSyncServerTimeMs
         self.dirtyDocumentIds = dirtyDocumentIds
+        self.pendingRemoteDeleteIds = pendingRemoteDeleteIds
         self.focusBehavior = focusBehavior
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, space, folders, tags, sidebarSections, documents, sharedDocuments, connections, settings
-        case vaultEnvelope, authSession, serverURL, lastSyncServerTimeMs, dirtyDocumentIds, focusBehavior
+        case vaultEnvelope, authSession, serverURL, lastSyncServerTimeMs, dirtyDocumentIds, pendingRemoteDeleteIds, focusBehavior
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,6 +75,7 @@ public struct WorkspaceSnapshot: Codable, Sendable {
         serverURL = try c.decodeIfPresent(String.self, forKey: .serverURL)
         lastSyncServerTimeMs = try c.decodeIfPresent(Int64.self, forKey: .lastSyncServerTimeMs) ?? 0
         dirtyDocumentIds = try c.decodeIfPresent([String].self, forKey: .dirtyDocumentIds) ?? []
+        pendingRemoteDeleteIds = try c.decodeIfPresent([String].self, forKey: .pendingRemoteDeleteIds) ?? []
         focusBehavior = try c.decodeIfPresent(FocusBehaviorState.self, forKey: .focusBehavior) ?? FocusBehaviorState()
     }
 }
@@ -97,12 +101,27 @@ public actor RoweDatabaseActor {
         self.fileURL = baseDir.appendingPathComponent("workspace.json")
 
         let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
+        enc.dateEncodingStrategy = .custom { date, encoder in
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var container = encoder.singleValueContainer()
+            try container.encode(fmt.string(from: date))
+        }
         enc.outputFormatting = [.sortedKeys]
         self.encoder = enc
 
         let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .iso8601
+        dec.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let str = try container.decode(String.self)
+            let withFrac = ISO8601DateFormatter()
+            withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = withFrac.date(from: str) { return d }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            if let d = plain.date(from: str) { return d }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date: \(str)")
+        }
         self.decoder = dec
     }
 

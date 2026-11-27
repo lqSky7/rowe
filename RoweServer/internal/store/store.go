@@ -39,6 +39,7 @@ type Store interface {
 
 	// Documents & Delta Sync
 	UpsertDocument(ctx context.Context, doc *model.SyncDocument) (*model.SyncDocument, error)
+	UpsertDocumentsBatch(ctx context.Context, docs []model.SyncDocument) ([]model.SyncDocument, error)
 	ListDocumentsSince(ctx context.Context, userID string, since time.Time) ([]model.SyncDocument, error)
 	GetDocument(ctx context.Context, userID, docID string) (*model.SyncDocument, error)
 	DeleteDocument(ctx context.Context, userID, docID string) error

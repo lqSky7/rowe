@@ -178,9 +178,10 @@ struct CalendarTasksView: View {
                 if showTasks {
                     ForEach(pendingTasks) { item in
                         let isDownsynced = downsyncWaveCoordinator?.highlightedTaskIds.contains(item.block.id) == true
-                        calendarTaskRow(item, day: day, isDownsynced: isDownsynced)
+                        let isHiddenForReveal = downsyncWaveCoordinator?.shouldHidePendingReveal(item.block.id) == true
+                        calendarTaskRow(item, day: day, isDownsynced: isDownsynced, isHiddenForReveal: isHiddenForReveal)
                             .id("pending-\(item.block.id)")
-                            .transition(isDownsynced ? .opacity : .roweUnblur)
+                            .transition((isDownsynced || isHiddenForReveal) ? .opacity : .roweUnblur)
                     }
 
                     if (pendingTasks.isEmpty && !finishedTasks.isEmpty) || showCompleted {
@@ -293,7 +294,7 @@ struct CalendarTasksView: View {
         }
     }
 
-    private func calendarTaskRow(_ item: ResolvedTaskItem, day: Date, isDownsynced: Bool = false) -> some View {
+    private func calendarTaskRow(_ item: ResolvedTaskItem, day: Date, isDownsynced: Bool = false, isHiddenForReveal: Bool = false) -> some View {
         let state = item.block.task?.state ?? .pending
         let isDone = state != .pending
         let images = item.block.task?.attachedImagesBase64 ?? []
@@ -325,22 +326,8 @@ struct CalendarTasksView: View {
                     )
                     .onTapGesture {
                         HapticsManager.shared.tap()
-                        if !reduceMotion && store.settings.crazyTaskComposeAnimation, let fc = flightCoordinator {
-                            fc.launchOpenForEdit(
-                                item: item,
-                                accentColor: selectedAccent,
-                                isDarkMode: colorScheme == .dark
-                            ) {
-                                var noAnim = Transaction()
-                                noAnim.disablesAnimations = true
-                                withTransaction(noAnim) {
-                                    store.activeTaskEditor = .edit(item)
-                                }
-                            }
-                        } else {
-                            withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
-                                store.activeTaskEditor = .edit(item)
-                            }
+                        withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                            store.activeTaskEditor = .edit(item)
                         }
                     }
 
@@ -397,7 +384,7 @@ struct CalendarTasksView: View {
             triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
             isDarkMode: colorScheme == .dark
         )
-        .opacity(flightCoordinator?.shouldHideRow(item.block.id) == true ? 0 : 1)
+        .opacity(((flightCoordinator?.shouldHideRow(item.block.id) == true) || isHiddenForReveal) ? 0 : 1)
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .named("macWindowSpace"))
         } action: { frame in

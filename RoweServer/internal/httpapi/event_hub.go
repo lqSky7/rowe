@@ -25,7 +25,7 @@ func NewEventHub() *EventHub {
 }
 
 func (h *EventHub) Subscribe(userID string) (chan SyncEvent, func()) {
-	ch := make(chan SyncEvent, 16)
+	ch := make(chan SyncEvent, 64)
 	h.mu.Lock()
 	if h.subscribers[userID] == nil {
 		h.subscribers[userID] = make(map[chan SyncEvent]struct{})

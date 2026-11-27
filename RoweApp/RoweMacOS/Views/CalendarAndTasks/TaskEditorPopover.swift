@@ -475,28 +475,10 @@ struct TaskEditorPopover: View {
     }
 
     private func commitAndClose() {
-        if let item = existingItem {
+        if existingItem != nil {
             persistExistingChanges()
-            if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation, let onCommitTaskForFlight {
-                var updatedBlock = item.block
-                updatedBlock.content = text
-                var meta = updatedBlock.task ?? TaskMetadata(isInbox: item.isInbox)
-                meta.scheduleDate = scheduleDate
-                meta.deadlineDate = deadlineDate
-                meta.reminderDate = reminderDate
-                meta.repeatRule = repeatRule
-                meta.attachedImagesBase64 = attachedImages
-                meta.applyStateTransition(to: taskState)
-                updatedBlock.task = meta
-                let updatedItem = ResolvedTaskItem(
-                    block: updatedBlock,
-                    documentId: item.documentId,
-                    documentTitle: item.documentTitle,
-                    isInbox: item.isInbox
-                )
-                onCommitTaskForFlight(updatedItem, textFieldFrame, popoverFrame)
-                return
-            }
+            onClose()
+            return
         } else {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty || !attachedImages.isEmpty {

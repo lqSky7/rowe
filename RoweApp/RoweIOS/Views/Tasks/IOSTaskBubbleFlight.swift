@@ -230,7 +230,8 @@ private struct TaskBubbleFrameMetrics {
         payload: TaskBubbleFlightPayload,
         rowFrame: CGRect,
         screenSize: CGSize,
-        targetComposerBottomInset: CGFloat
+        targetComposerBottomInset: CGFloat,
+        liveComposerFrame: CGRect
     ) -> TaskBubbleFrameMetrics {
         let textW = payload.measuredTextSize.width
         let textH = payload.measuredTextSize.height
@@ -266,7 +267,8 @@ private struct TaskBubbleFrameMetrics {
                 bubbleW: bubbleW,
                 bubbleH: bubbleH,
                 screenSize: screenSize,
-                targetComposerBottomInset: targetComposerBottomInset
+                targetComposerBottomInset: targetComposerBottomInset,
+                liveComposerFrame: liveComposerFrame
             )
         }
     }
@@ -383,16 +385,22 @@ private struct TaskBubbleFrameMetrics {
         bubbleW: CGFloat,
         bubbleH: CGFloat,
         screenSize: CGSize,
-        targetComposerBottomInset: CGFloat
+        targetComposerBottomInset: CGFloat,
+        liveComposerFrame: CGRect
     ) -> TaskBubbleFrameMetrics {
-        let composerW = max(260, screenSize.width - 28)
-        let composerH: CGFloat = 152
-        let composerRect = CGRect(
-            x: (screenSize.width - composerW) * 0.5,
-            y: screenSize.height - targetComposerBottomInset - composerH,
-            width: composerW,
-            height: composerH
-        )
+        let composerRect: CGRect = {
+            if liveComposerFrame.width > 120 && liveComposerFrame.height > 60 {
+                return liveComposerFrame
+            }
+            let composerW = max(260, screenSize.width - 28)
+            let composerH: CGFloat = 152
+            return CGRect(
+                x: (screenSize.width - composerW) * 0.5,
+                y: screenSize.height - targetComposerBottomInset - composerH,
+                width: composerW,
+                height: composerH
+            )
+        }()
         let destTextOriginX = composerRect.minX + 18
         let destTextMidY = composerRect.minY + 66
         let rawDestX = destTextOriginX + payload.measuredTextSize.width * 0.5
@@ -489,6 +497,7 @@ private struct TaskBubbleFrameMetrics {
 struct IOSTaskBubbleFlightOverlay: View {
     @Bindable var coordinator: IOSTaskFlightCoordinator
     var targetComposerBottomInset: CGFloat = 324
+    var liveComposerFrame: CGRect = .zero
 
     var body: some View {
         if let payload = coordinator.activeFlight {
@@ -503,7 +512,8 @@ struct IOSTaskBubbleFlightOverlay: View {
                         payload: payload,
                         rowFrame: rowFrame,
                         screenSize: geo.size,
-                        targetComposerBottomInset: targetComposerBottomInset
+                        targetComposerBottomInset: targetComposerBottomInset,
+                        liveComposerFrame: liveComposerFrame
                     )
 
                     ZStack {

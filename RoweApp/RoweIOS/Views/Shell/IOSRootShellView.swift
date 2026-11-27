@@ -32,6 +32,21 @@ enum IOSRoute: Hashable {
     case sharedWithMe
 }
 
+private struct ConditionalGlassMorphID: ViewModifier {
+    let enabled: Bool
+    let id: String
+    let namespace: Namespace.ID
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.roweIOSGlassMorphID(id, in: namespace)
+        } else {
+            content
+        }
+    }
+}
+
 /// Root iOS shell:
 /// - Native `CompactTabBarController` (`UITabBarController`) with constrained `tabBar.frame`
 ///   to preserve native Liquid Glass material and droplet animations on bottom-left
@@ -51,6 +66,7 @@ struct IOSRootShellView: View {
     @State private var tabBarPillRect: CGRect = .zero
     @State private var keyboardHeight: CGFloat = 0
     @State private var lastKnownKeyboardHeight: CGFloat = 312
+    @State private var liveComposerFrame: CGRect = .zero
     @State private var flightCoordinator = IOSTaskFlightCoordinator()
     @State private var downsyncWaveCoordinator = IOSDownsyncWaveCoordinator()
     @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding")
@@ -117,23 +133,8 @@ struct IOSRootShellView: View {
                     editingTaskItem = item
                     flightCoordinator.activeEditingBlockId = item.block.id
                     quickAddDefaultDate = item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: Date())
-                    if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation {
-                        // Mount the composer immediately (hidden while bubble flies) so the keyboard pre-triggers
-                        // and rises in parallel with the bubble flying straight to the above-keyboard position!
-                        var noAnim = Transaction()
-                        noAnim.disablesAnimations = true
-                        withTransaction(noAnim) {
-                            showQuickAddSheet = true
-                        }
-                        flightCoordinator.launchOpenForEdit(
-                            item: item,
-                            accentColor: resolvedAccent,
-                            isDarkMode: isDarkMode
-                        ) {}
-                    } else {
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
-                            showQuickAddSheet = true
-                        }
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
+                        showQuickAddSheet = true
                     }
                 },
                 onReplayOnboarding: { showOnboarding = true },
@@ -168,10 +169,7 @@ struct IOSRootShellView: View {
                         ? tabBarPillRect.midY
                         : (geo.size.height - 52)
                     let collapsedBottom = max(12, geo.size.height - centerY - buttonSize / 2)
-                    let isOpeningForEdit = flightCoordinator.activeFlight?.direction == .openForEdit
-                    let expandedBottom = isOpeningForEdit
-                        ? (max(keyboardHeight, lastKnownKeyboardHeight) + 12)
-                        : max(keyboardHeight + 12, geo.safeAreaInsets.bottom + 14)
+                    let expandedBottom = max(keyboardHeight + 12, geo.safeAreaInsets.bottom + 14)
                     let hideDuringFlight = flightCoordinator.activeFlight != nil && !showQuickAddSheet
 
                     IOSGlassMorphContainer(spacing: 24) {
@@ -250,11 +248,17 @@ struct IOSRootShellView: View {
                                         editingTaskItem = nil
                                     }
                                 }
+                                .id(editingTaskItem?.id ?? "create-new-task")
                                 .frame(width: max(260, geo.size.width - 28))
                                 .roweIOSGlassRoundedRect(radius: 24, interactive: false)
-                                .roweIOSGlassMorphID("taskComposerMorph", in: composerMorphNS)
-                                .opacity(isOpeningForEdit ? 0 : 1)
-                                .allowsHitTesting(!isOpeningForEdit)
+                                .modifier(ConditionalGlassMorphID(enabled: editingTaskItem == nil, id: "taskComposerMorph", namespace: composerMorphNS))
+                                .onGeometryChange(for: CGRect.self) { proxy in
+                                    proxy.frame(in: .global)
+                                } action: { frame in
+                                    if frame.width > 100 && frame.height > 60 {
+                                        liveComposerFrame = frame
+                                    }
+                                }
                                 .padding(.trailing, 14)
                                 .padding(.bottom, expandedBottom)
                             }
@@ -268,7 +272,8 @@ struct IOSRootShellView: View {
             // Pure SwiftUI refracting Liquid Glass Bubble flight overlay (zero UIKit layerEffect conflicts)
             IOSTaskBubbleFlightOverlay(
                 coordinator: flightCoordinator,
-                targetComposerBottomInset: max(keyboardHeight, lastKnownKeyboardHeight) + 12
+                targetComposerBottomInset: max(keyboardHeight, lastKnownKeyboardHeight) + 12,
+                liveComposerFrame: liveComposerFrame
             )
 
             // Top-to-bottom optical downsync shockwave + gradual dim (excluding newly synced tasks)
@@ -358,6 +363,21 @@ struct IOSRootShellView: View {
         }
         .onChange(of: store.settings.hasCompletedOnboarding) { _, completed in
             showOnboarding = !completed
+        }
+        .onChange(of: store.isSyncing) { _, syncing in
+            guard store.isSignedIn,
+                  !store.settings.reduceAnimations,
+                  store.settings.crazySyncAnimation else { return }
+            if syncing {
+                // Never fire the sync shader during a local task upsync or active bubble flight!
+                guard !store.hasPendingCloudSync, flightCoordinator.activeFlight == nil else { return }
+                downsyncWaveCoordinator.beginConverging(
+                    isDarkMode: isDarkMode,
+                    sourceView: flightCoordinator.snapshotSourceView
+                )
+            } else {
+                downsyncWaveCoordinator.finishConvergingIfIdle()
+            }
         }
         .onChange(of: store.downsyncWaveId) { _, _ in
             guard !store.settings.reduceAnimations,

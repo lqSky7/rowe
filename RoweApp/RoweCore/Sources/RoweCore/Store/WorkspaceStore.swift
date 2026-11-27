@@ -151,7 +151,11 @@ public final class WorkspaceStore {
     public var hasPendingCloudSync: Bool { !dirtyDocumentIds.isEmpty }
     public var onTaskMutatedForLiveSync: ((String) -> Void)?
     private var dirtyDocumentIds: Set<String> = []
+    private var dirtyDocumentVersions: [String: UInt64] = [:]
+    private var pendingRemoteDeleteIds: Set<String> = []
+    private var lastServerUpdatedAtByDoc: [String: Date] = [:]
     private var lastSyncServerTimeMs: Int64 = 0
+    private var inFlightRefreshTask: Task<AuthSession, Error>? = nil
     private var syncDebounceTask: Task<Void, Never>?
     private var focusSyncDebounceTask: Task<Void, Never>?
     private var sseStreamTask: Task<Void, Never>?
@@ -280,6 +284,7 @@ public final class WorkspaceStore {
             self.authSession = loaded.authSession
             self.lastSyncServerTimeMs = loaded.lastSyncServerTimeMs
             self.dirtyDocumentIds = Set(loaded.dirtyDocumentIds)
+            self.pendingRemoteDeleteIds = Set(loaded.pendingRemoteDeleteIds)
             self.focusBehavior = loaded.focusBehavior
             if let savedURL = loaded.serverURL,
                !savedURL.isEmpty,
@@ -510,6 +515,9 @@ public final class WorkspaceStore {
     public func permanentlyDeleteDocument(docId: String) {
         dirtyDocumentIds.remove(docId)
         documents.removeAll(where: { $0.id == docId })
+        if authSession != nil {
+            pendingRemoteDeleteIds.insert(docId)
+        }
         if case .document(let currentId) = currentDestination, currentId == docId {
             navigate(to: .allDocs)
         }
@@ -1660,6 +1668,7 @@ public final class WorkspaceStore {
 
     private func persistAndReindex(_ doc: RoweDocument, fastSync: Bool = false) {
         dirtyDocumentIds.insert(doc.id)
+        dirtyDocumentVersions[doc.id, default: 0] &+= 1
         scheduleDebouncedCloudSync(delayOverride: fastSync ? 0.4 : nil)
         let snapshot = makeSnapshot()
         let docs = self.documents
@@ -1808,6 +1817,13 @@ public final class WorkspaceStore {
                             }
                         }
                     }
+                } catch BackendError.unauthorized {
+                    self.isRealtimeSyncConnected = false
+                    // Immediately refresh and reconnect with zero backoff on token expiry.
+                    if (try? await self.refreshSessionSerialized()) != nil {
+                        retryDelay = 2.0
+                        continue
+                    }
                 } catch {
                     self.isRealtimeSyncConnected = false
                 }
@@ -1836,17 +1852,35 @@ public final class WorkspaceStore {
         isRealtimeSyncConnected = false
     }
 
+    /// Coalesces concurrent 401 token refreshes behind a single in-flight task so rotating
+    /// refresh tokens are never consumed twice by parallel sync/SSE/focus requests.
+    private func refreshSessionSerialized() async throws -> AuthSession {
+        if let existing = inFlightRefreshTask {
+            return try await existing.value
+        }
+        guard let current = authSession else { throw BackendError.unauthorized }
+        let client = self.backendClient
+        let task = Task<AuthSession, Error> { @MainActor in
+            let refreshed = try await client.refresh(serverURL: current.serverURL, refreshToken: current.refreshToken)
+            var updated = current
+            updated.accessToken = refreshed.accessToken
+            updated.refreshToken = refreshed.refreshToken
+            self.authSession = updated
+            await self.database.scheduleSave(self.makeSnapshot())
+            return updated
+        }
+        inFlightRefreshTask = task
+        defer { inFlightRefreshTask = nil }
+        return try await task.value
+    }
+
     private func withAuthorizedSession<T>(_ operation: @Sendable (AuthSession) async throws -> T) async throws -> T {
-        guard var sess = authSession else { throw BackendError.unauthorized }
+        guard let sess = authSession else { throw BackendError.unauthorized }
         do {
             return try await operation(sess)
         } catch BackendError.unauthorized {
-            let refreshed = try await backendClient.refresh(serverURL: sess.serverURL, refreshToken: sess.refreshToken)
-            sess.accessToken = refreshed.accessToken
-            sess.refreshToken = refreshed.refreshToken
-            self.authSession = sess
-            await database.scheduleSave(makeSnapshot())
-            return try await operation(sess)
+            let updated = try await refreshSessionSerialized()
+            return try await operation(updated)
         }
     }
 
@@ -1875,7 +1909,11 @@ public final class WorkspaceStore {
             try await withAuthorizedSession { sess in
                 try await self.backendClient.deleteDocument(serverURL: sess.serverURL, accessToken: sess.accessToken, id: docId)
             }
+            if pendingRemoteDeleteIds.remove(docId) != nil {
+                schedulePersistence()
+            }
         } catch {
+            pendingRemoteDeleteIds.insert(docId)
             lastSyncStatusMessage = "Delete sync error: \(error.localizedDescription)"
         }
     }
@@ -1955,6 +1993,15 @@ public final class WorkspaceStore {
         }
 
         do {
+            // Flush any queued permanent deletes before pulling so deleted docs never resurrect.
+            if !pendingRemoteDeleteIds.isEmpty {
+                for delId in Array(pendingRemoteDeleteIds) {
+                    try await withAuthorizedSession { sess in
+                        try await self.backendClient.deleteDocument(serverURL: sess.serverURL, accessToken: sess.accessToken, id: delId)
+                    }
+                    pendingRemoteDeleteIds.remove(delId)
+                }
+            }
             let encoder = Self.makeFractionalISO8601Encoder()
             var pendingIds = (lastSyncServerTimeMs == 0) ? Set(documents.map(\.id)) : dirtyDocumentIds
             // 1s overlap window eliminates millisecond boundary skips between Go time.Now() and SQLite.
@@ -1992,7 +2039,10 @@ public final class WorkspaceStore {
                 }
             }
 
-            // Step 2: Build push payload AFTER applying remote tombstones so deleted docs are never resurrected
+            // Step 2: Re-merge any newly dirtied docs accumulated during pull, then snapshot versions before pushing
+            pendingIds.formUnion(dirtyDocumentIds)
+            pendingIds.subtract(deletedRemoteIds)
+            let pushedVersions = Dictionary(uniqueKeysWithValues: pendingIds.map { ($0, dirtyDocumentVersions[$0] ?? 0) })
             let dtos = buildSyncDTOs(for: pendingIds, encoder: encoder)
             if !dtos.isEmpty {
                 let pushed = try await withAuthorizedSession { sess in
@@ -2000,9 +2050,11 @@ public final class WorkspaceStore {
                 }
                 // Align local updatedAt with authoritative server timestamps to eliminate client clock skew.
                 for serverDoc in pushed.documents {
-                    if let serverUpdated = serverDoc.updatedAt,
-                       let idx = documents.firstIndex(where: { $0.id == serverDoc.id }) {
-                        documents[idx].updatedAt = serverUpdated
+                    if let serverUpdated = serverDoc.updatedAt {
+                        lastServerUpdatedAtByDoc[serverDoc.id] = serverUpdated
+                        if let idx = documents.firstIndex(where: { $0.id == serverDoc.id }) {
+                            documents[idx].updatedAt = serverUpdated
+                        }
                     }
                 }
                 lastSyncServerTimeMs = max(pulled.serverTime, pushed.serverTime)
@@ -2024,7 +2076,14 @@ public final class WorkspaceStore {
                 await self.syncFocusStateWithBackend()
             }
 
-            dirtyDocumentIds.subtract(pendingIds)
+            // Only clear dirty flags for docs whose version did not advance while push was in flight
+            for id in pendingIds {
+                if (dirtyDocumentVersions[id] ?? 0) == pushedVersions[id] {
+                    dirtyDocumentIds.remove(id)
+                } else {
+                    needsFollowUpSync = true
+                }
+            }
             dirtyDocumentIds.subtract(deletedRemoteIds)
             firstDirtyAt = dirtyDocumentIds.isEmpty ? nil : Date()
             consecutiveSyncFailures = 0
@@ -2056,8 +2115,8 @@ public final class WorkspaceStore {
     private func mergeRemoteDocuments(_ remoteDocs: [SyncDocumentDTO], localDirtyIds: Set<String>) {
         let decoder = Self.makeFractionalISO8601Decoder()
         for r in remoteDocs {
-            // Respect server tombstones so permanently deleted docs never resurrect across devices.
-            if r.deletedAt != nil {
+            // Respect server tombstones and queued local permanent deletes so deleted docs never resurrect.
+            if r.deletedAt != nil || pendingRemoteDeleteIds.contains(r.id) {
                 documents.removeAll(where: { $0.id == r.id })
                 dirtyDocumentIds.remove(r.id)
                 if case .document(let currentId) = currentDestination, currentId == r.id {
@@ -2069,6 +2128,13 @@ public final class WorkspaceStore {
                 let remoteUpdated = r.updatedAt ?? Date.distantPast
                 let localDoc = documents[idx]
                 let isLocalDirty = localDirtyIds.contains(r.id)
+                // Ignore 1s-overlap echoes of a server timestamp we already know when local doc has fresh unpushed edits
+                if isLocalDirty, let knownServerTs = lastServerUpdatedAtByDoc[r.id], knownServerTs == remoteUpdated {
+                    continue
+                }
+                if let rTs = r.updatedAt {
+                    lastServerUpdatedAtByDoc[r.id] = rTs
+                }
                 let bothEdited = isLocalDirty && remoteUpdated > localDoc.updatedAt
                 if bothEdited {
                     var conflictBlocks: [Block] = []
@@ -2588,6 +2654,7 @@ public final class WorkspaceStore {
             serverURL: serverURL,
             lastSyncServerTimeMs: lastSyncServerTimeMs,
             dirtyDocumentIds: Array(dirtyDocumentIds),
+            pendingRemoteDeleteIds: Array(pendingRemoteDeleteIds),
             focusBehavior: focusBehavior
         )
     }

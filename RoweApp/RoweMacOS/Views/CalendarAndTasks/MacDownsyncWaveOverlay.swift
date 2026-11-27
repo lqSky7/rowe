@@ -6,39 +6,51 @@ import SwiftUI
 import RoweCore
 
 enum MacDownsyncWavePhase {
-    /// Phase 1: Rainbow + upward distortion converging toward the top edge while reaching backend
+    /// Phase 1: Rainbow + upward distortion + progressive blur converging toward the top edge while reaching backend
     case converging(id: UUID, startTime: Date, fadeOutStartTime: Date?, isDarkMode: Bool, backdropCGImage: CGImage?)
-    /// Phase 2: Luminous soft-white wave with rainbow halo expanding downward to midway when new tasks arrive
+    /// Phase 2: Luminous soft-white wave with rainbow halo + progressive blur expanding downward to midway
     case expanding(id: UUID, taskIds: Set<String>, startTime: Date, isDarkMode: Bool, backdropCGImage: CGImage?)
 }
 
-/// Coordinates the 2-phase optical sync animation on macOS (exact parity with iOS):
-/// 1. **Converging (Trying to Sync)**: Rainbow arc + upward distortion converges toward the top edge.
-/// 2. **Expanding (New Data Arrived)**: Soft-white wave with rainbow prism halo expands organically
-///    from top toward midway and fades out gracefully, with a smooth screen dim excluding newly
-///    synced tasks and a single thin bright shimmer on those rows (no scale-up).
+/// Coordinates the full ~2.05s 2-phase optical sync animation on macOS (exact parity with iOS):
+/// 1. **Phase 1 (~0.56s — Converging Rainbow + Top Stretch + Progressive Blur)**: Newly downsynced tasks
+///    stay hidden (`opacity 0`) while the rainbow arc & upward distortion converge toward the top edge.
+/// 2. **Phase 2 (~1.52s — Expanding Soft-White Wave with Rainbow Halo + Reveal + Dim Fade)**:
+///    Soft-white wave with rainbow halo & wide progressive blur expands organically from top toward midway,
+///    tasks smoothly fade in (NO scale-up) with a single thin bright shimmer, and the dim fades smoothly out.
 @MainActor
 @Observable
 final class MacDownsyncWaveCoordinator {
     var activePhase: MacDownsyncWavePhase? = nil
+    var pendingRevealTaskIds: Set<String> = []
     var highlightedTaskIds: Set<String> = []
     var shimmerTriggerId: UUID = UUID()
 
     @ObservationIgnored private var launchTask: Task<Void, Never>?
+    @ObservationIgnored private var revealTask: Task<Void, Never>?
     @ObservationIgnored private var cleanupTask: Task<Void, Never>?
     @ObservationIgnored private var lastConvergeTriggerAt: Date = .distantPast
+    @ObservationIgnored private var lastExpandTriggerAt: Date = .distantPast
 
+    static let convergeCooldown: TimeInterval = 12.0
+    static let expandCooldown: TimeInterval = 6.0
     static let convergeDuration: TimeInterval = 0.56
     static let convergeFadeOutDuration: TimeInterval = 0.34
-    static let waveDuration: TimeInterval = 0.98
-    static let dimFadeOutStart: TimeInterval = 0.94
-    static let dimFadeOutDuration: TimeInterval = 0.76
-    static let expandTotalDuration: TimeInterval = 1.74
+    static let waveDuration: TimeInterval = 1.05
+    static let dimFadeOutStart: TimeInterval = 0.88
+    static let dimFadeOutDuration: TimeInterval = 0.62
+    static let expandTotalDuration: TimeInterval = 1.52
+
+    func shouldHidePendingReveal(_ blockId: String) -> Bool {
+        pendingRevealTaskIds.contains(blockId)
+    }
 
     func beginConverging(isDarkMode: Bool) {
         if case .expanding = activePhase { return }
+        if !pendingRevealTaskIds.isEmpty { return }
         let now = Date()
-        guard now.timeIntervalSince(lastConvergeTriggerAt) > 1.2 else { return }
+        guard now.timeIntervalSince(lastConvergeTriggerAt) >= Self.convergeCooldown,
+              now.timeIntervalSince(lastExpandTriggerAt) >= Self.convergeCooldown else { return }
         lastConvergeTriggerAt = now
 
         cleanupTask?.cancel()
@@ -60,6 +72,7 @@ final class MacDownsyncWaveCoordinator {
     }
 
     func finishConvergingIfIdle() {
+        guard pendingRevealTaskIds.isEmpty else { return }
         guard case .converging(let id, let startTime, let existingFade, let isDarkMode, let snap) = activePhase,
               existingFade == nil else { return }
         cleanupTask?.cancel()
@@ -82,11 +95,37 @@ final class MacDownsyncWaveCoordinator {
 
     func trigger(taskIds: Set<String>, isDarkMode: Bool) {
         guard !taskIds.isEmpty else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastExpandTriggerAt) >= Self.expandCooldown else { return }
+        lastExpandTriggerAt = now
+        lastConvergeTriggerAt = now
         launchTask?.cancel()
+        revealTask?.cancel()
         cleanupTask?.cancel()
 
+        // Immediately hide newly downsynced tasks so they NEVER appear before the wave
+        pendingRevealTaskIds = taskIds
+        highlightedTaskIds = []
+
+        // Guarantee full Phase 1 converging rainbow (~0.56s) even when backend responded quickly
+        let remainingConverge: TimeInterval
+        if case .converging(_, let startTime, nil, _, _) = activePhase {
+            let elapsed = Date().timeIntervalSince(startTime)
+            remainingConverge = max(0.05, Self.convergeDuration - elapsed)
+        } else {
+            let snap = Self.captureWindowSnapshot()
+            activePhase = .converging(
+                id: UUID(),
+                startTime: Date(),
+                fadeOutStartTime: nil,
+                isDarkMode: isDarkMode,
+                backdropCGImage: snap
+            )
+            remainingConverge = Self.convergeDuration
+        }
+
         launchTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 32_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(remainingConverge * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
 
             let snap = Self.captureWindowSnapshot()
@@ -102,12 +141,21 @@ final class MacDownsyncWaveCoordinator {
             )
             HapticsManager.shared.boundarySnap()
 
+            self.revealTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 220_000_000)
+                guard !Task.isCancelled, let self else { return }
+                withAnimation(.easeOut(duration: 0.28)) {
+                    self.pendingRevealTaskIds.subtract(taskIds)
+                }
+            }
+
             self.cleanupTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(Self.expandTotalDuration * 1_000_000_000))
                 guard !Task.isCancelled, let self else { return }
                 if case .expanding(let curId, _, _, _, _) = self.activePhase, curId == id {
                     self.activePhase = nil
                     self.highlightedTaskIds = []
+                    self.pendingRevealTaskIds = []
                 }
             }
         }
@@ -119,7 +167,7 @@ final class MacDownsyncWaveCoordinator {
               view.bounds.width > 20, view.bounds.height > 20 else {
             return nil
         }
-        let scale: CGFloat = 0.45
+        let scale: CGFloat = 1.0
         let w = max(1, Int(view.bounds.width * scale))
         let h = max(1, Int(view.bounds.height * scale))
         guard let ctx = CGContext(
@@ -234,35 +282,42 @@ final class MacDownsyncMetalCache {
         float width = signedDist > 0.0f ? leadWidth : trailWidth;
         float normD = signedDist / max(width, 0.02f);
         float waveBell = exp(-normD * normD);
-        float waveEnergy = waveBell * env * verticalFade;
 
-        float pullSign = isExpanding ? -1.0f : 1.0f;
-        float stretchStrength = isExpanding ? 1.0f : 0.78f;
-        float stretchWave = (0.62f * waveBell + 0.38f * (-normD * exp(-0.80f * normD * normD))) * env * verticalFade * stretchStrength;
-        float2 maxStretchUV = float2(0.032f, 0.085f);
-        float2 baseDisp = (pullSign * dir) * stretchWave * maxStretchUV;
-
-        float blurUV = waveEnergy * (isExpanding ? 0.0095f : 0.0075f);
-        float2 blurStep = dir * blurUV;
+        // 1. True smooth liquid-lens magnification stretch (zero pixelation)
+        float stretchEnv = waveBell * env * verticalFade;
+        float lensScale = isExpanding ? (1.0f - 0.16f * stretchEnv) : (1.0f + 0.13f * stretchEnv);
 
         constexpr sampler s(filter::linear, address::clamp_to_edge);
-        float2 pR = clamp(uv + baseDisp * 1.28f, 0.001f, 0.999f);
-        float2 pG = clamp(uv + baseDisp * 1.00f, 0.001f, 0.999f);
-        float2 pB = clamp(uv + baseDisp * 0.72f, 0.001f, 0.999f);
+        float2 pR = clamp(origin + delta * mix(1.0f, lensScale, 1.14f), 0.001f, 0.999f);
+        float2 pG = clamp(origin + delta * lensScale, 0.001f, 0.999f);
+        float2 pB = clamp(origin + delta * mix(1.0f, lensScale, 0.86f), 0.001f, 0.999f);
 
-        float r = backdrop.sample(s, pR).r * 0.52f
-                + backdrop.sample(s, clamp(pR - blurStep, 0.001f, 0.999f)).r * 0.30f
-                + backdrop.sample(s, clamp(pR + blurStep * 0.50f, 0.001f, 0.999f)).r * 0.18f;
+        // 2. Smooth 16-tap golden-angle Vogel spiral progressive blur (silky frosted glass)
+        float blurWidth = max(width * 1.80f, 0.22f);
+        float blurBell = exp(-pow(signedDist / blurWidth, 2.0f));
+        float topBlur = exp(-max(uv.y, 0.0f) * 2.8f) * (isExpanding ? exp(-u.progress * 2.4f) : smoothstep(0.1f, 0.9f, u.progress));
+        float progBlurAmt = clamp(max(blurBell, topBlur * 0.85f) * env * verticalFade, 0.0f, 1.0f);
+        float2 blurRadiusUV = float2(progBlurAmt * (isExpanding ? 0.012f : 0.010f) / max(aspect, 0.5f),
+                                     progBlurAmt * (isExpanding ? 0.012f : 0.010f));
 
-        float g = backdrop.sample(s, pG).g * 0.52f
-                + backdrop.sample(s, clamp(pG - blurStep, 0.001f, 0.999f)).g * 0.30f
-                + backdrop.sample(s, clamp(pG + blurStep * 0.50f, 0.001f, 0.999f)).g * 0.18f;
+        float rAcc = 0.0f;
+        float gAcc = 0.0f;
+        float bAcc = 0.0f;
+        float wSum = 0.0f;
+        const float goldenAngle = 2.39996323f;
+        for (int i = 0; i < 16; i++) {
+            float fi = float(i) + 0.5f;
+            float rNorm = sqrt(fi / 16.0f);
+            float theta = fi * goldenAngle;
+            float2 off = float2(cos(theta), sin(theta)) * blurRadiusUV * rNorm;
+            float w = exp(-1.8f * rNorm * rNorm);
+            rAcc += backdrop.sample(s, clamp(pR + off, 0.001f, 0.999f)).r * w;
+            gAcc += backdrop.sample(s, clamp(pG + off, 0.001f, 0.999f)).g * w;
+            bAcc += backdrop.sample(s, clamp(pB + off, 0.001f, 0.999f)).b * w;
+            wSum += w;
+        }
 
-        float b = backdrop.sample(s, pB).b * 0.52f
-                + backdrop.sample(s, clamp(pB - blurStep, 0.001f, 0.999f)).b * 0.30f
-                + backdrop.sample(s, clamp(pB + blurStep * 0.50f, 0.001f, 0.999f)).b * 0.18f;
-
-        float3 refracted = float3(r, g, b);
+        float3 refracted = float3(rAcc, gAcc, bAcc) / max(wSum, 1e-4f);
 
         float radialHue = clamp((signedDist / max(width * 1.35f, 0.08f)) * 0.5f + 0.5f, 0.0f, 1.0f);
         float lateralShift = 0.14f * sin(uv.x * 4.2f + u.progress * 2.4f);
@@ -278,7 +333,7 @@ final class MacDownsyncMetalCache {
             glowRGB = rainbowColor * (rainbowBand * gain + topGather * 0.24f)
                     + float3(1.0f, 0.98f, 0.96f) * (topGather * 0.18f);
             blendAmt = clamp(rainbowBand * 1.05f + topGather * 0.85f, 0.0f, 0.82f);
-            alpha = clamp(max(waveBell * 1.15f, topGather) * env * verticalFade, 0.0f, 1.0f);
+            alpha = clamp(max(max(blurBell * 1.15f, waveBell * 1.20f), topGather) * env * verticalFade, 0.0f, 1.0f);
         } else {
             float coreWidth = mix(0.095f, 0.23f, u.progress);
             float haloWidth = mix(0.22f, 0.44f, u.progress);
@@ -293,7 +348,7 @@ final class MacDownsyncMetalCache {
             glowRGB = float3(1.0f, 0.99f, 0.98f) * (coreArc * coreGain + topLaunch * 0.22f)
                     + rainbowColor * (rainbowHalo * haloGain + topLaunch * 0.26f);
             blendAmt = clamp(coreArc + rainbowHalo * 1.05f + topLaunch, 0.0f, 0.88f);
-            alpha = clamp(max(max(waveBell * 1.25f, rainbowHalo), topLaunch) * env * verticalFade, 0.0f, 1.0f);
+            alpha = clamp(max(max(blurBell * 1.18f, rainbowHalo), topLaunch) * env * verticalFade, 0.0f, 1.0f);
         }
 
         float3 screened = 1.0f - (1.0f - clamp(refracted, 0.0f, 1.0f)) * (1.0f - clamp(glowRGB, 0.0f, 0.68f));
@@ -397,8 +452,8 @@ private struct MacDownsyncWaveMetalView: NSViewRepresentable {
     }
 }
 
-/// Full-window macOS overlay rendering both Phase 1 (converging rainbow + top distortion) and
-/// Phase 2 (expanding soft-white wave with rainbow halo + gradual dim excluding newly synced tasks).
+/// Full-window macOS overlay rendering both Phase 1 (converging rainbow + top distortion + progressive blur)
+/// and Phase 2 (expanding soft-white wave with rainbow halo + progressive blur + gradual dim).
 struct MacDownsyncWaveOverlay: View {
     @Bindable var waveCoordinator: MacDownsyncWaveCoordinator
     @Bindable var flightCoordinator: MacTaskFlightCoordinator
@@ -412,7 +467,7 @@ struct MacDownsyncWaveOverlay: View {
                         let elapsed = max(0, timeline.date.timeIntervalSince(startTime))
                         let rawP = min(max(elapsed / MacDownsyncWaveCoordinator.convergeDuration, 0), 1)
                         let easedProgress = 1.0 - pow(1.0 - rawP, 2.1)
-                        let fadeIn = smoothstep(min(max(elapsed / 0.16, 0), 1))
+                        let fadeIn = smoothstep(min(max(elapsed / 0.14, 0), 1))
                         let fadeOut: Double = {
                             guard let fStart = fadeOutStart else { return 1.0 }
                             let fe = max(0, timeline.date.timeIntervalSince(fStart))
@@ -439,10 +494,10 @@ struct MacDownsyncWaveOverlay: View {
                     case .expanding(_, let taskIds, let startTime, let isDarkMode, let snap):
                         let elapsed = max(0, timeline.date.timeIntervalSince(startTime))
                         let rawP = min(max(elapsed / MacDownsyncWaveCoordinator.waveDuration, 0), 1)
-                        let easedProgress = 1.0 - pow(1.0 - rawP, 2.2)
+                        let easedProgress = 1.0 - pow(1.0 - rawP, 2.15)
 
-                        let waveIn = smoothstep(min(max(elapsed / 0.11, 0), 1))
-                        let waveOut = 1.0 - smoothstep(min(max((elapsed - 0.36) / 0.60, 0), 1))
+                        let waveIn = smoothstep(min(max(elapsed / 0.10, 0), 1))
+                        let waveOut = 1.0 - smoothstep(min(max((elapsed - 0.40) / 0.65, 0), 1))
                         let waveIntensity = waveIn * waveOut
 
                         let dimIn = smoothstep(min(max(elapsed / 0.18, 0), 1))
@@ -593,12 +648,12 @@ struct MacDownsyncTaskShimmerModifier: ViewModifier {
             withAnimation(.easeOut(duration: 0.14)) {
                 shimmerOpacity = 1.0
             }
-            withAnimation(.easeInOut(duration: 0.62)) {
+            withAnimation(.easeInOut(duration: 0.66)) {
                 sweepProgress = 1.25
             }
-            try? await Task.sleep(nanoseconds: 460_000_000)
+            try? await Task.sleep(nanoseconds: 480_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.24)) {
+            withAnimation(.easeOut(duration: 0.26)) {
                 shimmerOpacity = 0.0
             }
         }

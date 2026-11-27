@@ -699,6 +699,10 @@ private struct MacTaskBubbleMetalView: NSViewRepresentable {
         mtk.colorPixelFormat = .bgra8Unorm
         mtk.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         mtk.layer?.isOpaque = false
+        mtk.framebufferOnly = true
+        if let metalLayer = mtk.layer as? CAMetalLayer {
+            metalLayer.presentsWithTransaction = true
+        }
         mtk.isPaused = true
         mtk.enableSetNeedsDisplay = true
         MacBubbleMetalCache.shared.prewarm()
@@ -802,6 +806,15 @@ struct MacTaskBubbleFlightOverlay: View {
                         }
 
                         if m.bubbleOpacity > 0.01 {
+                            // 1-frame anti-flicker frosted bridge while MTKView initializes its first drawable
+                            if elapsed < 0.055 {
+                                RoundedRectangle(cornerRadius: m.cornerRadius, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                                    .frame(width: m.halfSize.width * 2, height: m.halfSize.height * 2)
+                                    .position(m.center)
+                                    .opacity(max(0, 1.0 - elapsed / 0.055))
+                                    .allowsHitTesting(false)
+                            }
                             MacTaskBubbleMetalView(
                                 backdropImage: payload.backdropCGImage,
                                 uniforms: MacBubbleUniforms(
