@@ -327,22 +327,33 @@ public struct RoweOnboardingView: View {
             }
             .padding(.horizontal, 28)
 
-            HStack(spacing: 10) {
-                minimalPermissionPill(
-                    title: screenTimeGranted ? "Screen Time On" : "Allow Screen Time",
-                    icon: screenTimeGranted ? "checkmark" : "hourglass",
-                    isGranted: screenTimeGranted
-                ) {
-                    requestScreenTime()
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    minimalPermissionPill(
+                        title: screenTimeGranted ? "Screen Time On" : "Allow Screen Time",
+                        icon: screenTimeGranted ? "checkmark" : "hourglass",
+                        isGranted: screenTimeGranted
+                    ) {
+                        requestScreenTime()
+                    }
+
+                    minimalPermissionPill(
+                        title: notificationsGranted ? "Notifications On" : "Allow Notifications",
+                        icon: notificationsGranted ? "checkmark" : "bell",
+                        isGranted: notificationsGranted
+                    ) {
+                        requestNotifications()
+                    }
                 }
 
-                minimalPermissionPill(
-                    title: notificationsGranted ? "Notifications On" : "Allow Notifications",
-                    icon: notificationsGranted ? "checkmark" : "bell",
-                    isGranted: notificationsGranted
-                ) {
-                    requestNotifications()
+                #if os(macOS)
+                if !screenTimeGranted {
+                    Text("Toggle Rowe on under Privacy & Security → Full Disk Access (click + if not listed).")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
                 }
+                #endif
             }
             .padding(.top, 4)
         }
@@ -406,7 +417,11 @@ public struct RoweOnboardingView: View {
 
     private func requestScreenTime() {
         #if os(macOS)
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+        let modernURL = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")
+        let legacyURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        if let url = modernURL, NSWorkspace.shared.open(url) {
+            // Opened directly to Full Disk Access
+        } else if let url = legacyURL {
             NSWorkspace.shared.open(url)
         }
         refreshPermissions()

@@ -5,13 +5,13 @@ extension DeviceActivityReport.Context {
     static let roweCircadianHistory = Self("com.rowe.focus.circadianHistory")
 }
 
-struct ScreenTimeAppRow: Identifiable, Hashable {
+struct ScreenTimeAppRow: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let minutes: Int
 }
 
-struct ScreenTimeHistorySummary {
+struct ScreenTimeHistorySummary: Sendable {
     let totalMinutes: Int
     let slotMinutes: [Double] // 12 x 2-hour circadian buckets
     let topApps: [ScreenTimeAppRow]
@@ -32,7 +32,7 @@ struct RoweCircadianHistoryScene: DeviceActivityReportScene {
     let context: DeviceActivityReport.Context = .roweCircadianHistory
     let content: (ScreenTimeHistorySummary) -> RoweCircadianHistoryReportView
 
-    func makeConfiguration(representing data: DeviceActivityResults<DeviceActivityData>) async -> ScreenTimeHistorySummary {
+    nonisolated func makeConfiguration(representing data: DeviceActivityResults<DeviceActivityData>) async -> ScreenTimeHistorySummary {
         var totalSeconds: TimeInterval = 0
         var slots = Array(repeating: 0.0, count: 12)
         var appSeconds: [String: TimeInterval] = [:]

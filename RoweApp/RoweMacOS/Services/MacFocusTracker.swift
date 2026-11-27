@@ -189,7 +189,11 @@ public final class MacFocusTracker {
     /// Opens macOS System Settings directly to Privacy & Security -> Full Disk Access
     /// so Rowe can read Apple's local Screen Time database (`knowledgeC.db`).
     public func requestScreenTimeAccess() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+        let modernURL = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")
+        let legacyURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        if let url = modernURL, NSWorkspace.shared.open(url) {
+            // Opened directly to Full Disk Access
+        } else if let url = legacyURL {
             NSWorkspace.shared.open(url)
         }
         refreshScreenTimeStatus(importIfAvailable: true)
