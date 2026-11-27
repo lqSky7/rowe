@@ -1,24 +1,27 @@
+import DeviceActivity
+import FamilyControls
 import SwiftUI
 import UserNotifications
 import RoweCore
 
-/// Native iOS Settings Form for Rowe's Adaptive Focus system.
-/// Reuses onboarding GlassGlow artwork, uses standard iOS `Form` / `Section` controls,
-/// gates explanatory text behind `i` buttons, and uses a visual Site Selector sheet.
+/// Native iOS Settings Form for Rowe's Apple Screen Time-powered Adaptive Focus system.
+/// Uses `FamilyControls` + `DeviceActivityReport` (instant 7-day historical Screen Time on Day 1)
+/// + native `FamilyActivityPicker` (zero package-name typing) + `info.circle` dialogs.
 struct IOSFocusPatternsView: View {
     @Bindable var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
+    @State private var focusManager = IOSFocusManager.shared
     @State private var bannerSent: Bool = false
     @State private var activeInfo: FocusInfoTopic?
+    @State private var showActivityPicker: Bool = false
     @State private var showSiteSelector: Bool = false
 
     private enum FocusInfoTopic: String, Identifiable {
         case nudges
+        case screentime
         case circadian
-        case observed
         case learned
-        case shortcuts
         case allowlist
 
         var id: String { rawValue }
@@ -26,10 +29,9 @@ struct IOSFocusPatternsView: View {
         var title: String {
             switch self {
             case .nudges: "Adaptive Task Nudges"
+            case .screentime: "Apple Screen Time"
             case .circadian: "Circadian Rhythm"
-            case .observed: "Observed Apps & Sites"
             case .learned: "Learned Windows"
-            case .shortcuts: "Instant 0-Second iPhone Nudges"
             case .allowlist: "Work & Study Allowlist"
             }
         }
@@ -37,49 +39,27 @@ struct IOSFocusPatternsView: View {
         var message: String {
             switch self {
             case .nudges:
-                "Rowe observes your scroll rhythm across Mac and iPhone and suggests a quick (≤ 25 min) unlocked task before long sessions. It never blocks apps, never reads PIN-locked notes, and stays silent if you have no quick tasks."
+                "Rowe reads your Apple Screen Time patterns and offers a quick (≤ 25 min) unlocked task before long sessions. It never blocks apps, never reads PIN-locked notes, and stays silent when you have no quick tasks."
+            case .screentime:
+                "Uses Apple's native FamilyControls & DeviceActivity frameworks so monitoring runs inside iOS Screen Time with 0% background battery drain, and your existing 7-day Screen Time history is usable immediately."
             case .circadian:
-                "Shows your deduplicated 7-day scroll minutes across Mac and iPhone grouped into 2-hour windows. Overlapping sessions on both devices are merged so time is never double-counted."
-            case .observed:
-                "Rowe observes silently for the first 3 sessions per app to calibrate your typical session length before offering suggestions."
+                "Displays your past 7 days of Apple Screen Time grouped into 2-hour windows alongside your top apps—available immediately from your existing Screen Time history."
             case .learned:
-                "As you accept or dismiss nudges, Rowe learns which time windows welcome a quick task and automatically mutes hours where you prefer to unwind, gently re-checking once every ~3 weeks."
-            case .shortcuts:
-                "To trigger instant non-blocking banners when you open Instagram, YouTube, or Reddit:\n\n1. Open Apple Shortcuts → Automation → + → App.\n2. Pick the app (Is Opened + Run Immediately) and add Rowe's \"Log App Opened for Focus Nudge\".\n3. Optional: add an Is Closed automation with \"Log App Closed\" for exact session length."
+                "As you accept or dismiss nudges, Rowe learns which hours welcome a quick task and automatically mutes hours where you prefer to unwind, gently re-checking once every ~3 weeks."
             case .allowlist:
-                "Browsers are never tracked as a whole — only distraction domains. Pick work or study sites so they are always ignored. Only aggregate rhythm syncs across devices."
+                "Sites and apps listed here are always treated as productive across your devices."
             }
         }
     }
 
-    private var accent: Color { Color(hex: store.settings.accentColor.hex) }
-
-    private var circadianSlots: [Double] {
-        store.circadianFocusMinutes(daysBack: 7)
-    }
-
-    private var totalMinutes7d: Int {
-        Int(circadianSlots.reduce(0, +).rounded())
-    }
-
-    private var observedTargets: [(slug: String, name: String, icon: String, sessions: Int, medianMins: Int)] {
-        let engine = FocusNudgeEngine()
-        let slugs = Array(Set(store.focusBehavior.intervals.map(\.canonicalTarget)))
-        var rows: [(slug: String, name: String, icon: String, sessions: Int, medianMins: Int)] = []
-        for slug in slugs {
-            let sessions = engine.mergedSessions(for: slug, from: store.focusBehavior.intervals)
-            guard !sessions.isEmpty else { continue }
-            let sortedMins = sessions.map(\.durationMinutes).sorted()
-            let med = sortedMins[sortedMins.count / 2]
-            rows.append((
-                slug: slug,
-                name: CanonicalTargetRegistry.displayName(for: slug),
-                icon: CanonicalTargetRegistry.iconName(for: slug),
-                sessions: sessions.count,
-                medianMins: max(1, Int(med.rounded()))
-            ))
-        }
-        return rows.sorted { $0.medianMins > $1.medianMins }
+    private var sevenDayFilter: DeviceActivityFilter {
+        let now = Date()
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
+        return DeviceActivityFilter(
+            segment: .hourly(during: DateInterval(start: weekAgo, end: now)),
+            users: .all,
+            devices: .init([.iPhone, .iPad, .mac])
+        )
     }
 
     private var silencedSlots: [(key: String, label: String, rec: SlotReceptivity)] {
@@ -105,7 +85,7 @@ struct IOSFocusPatternsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Adaptive Focus")
                             .font(.headline)
-                        Text("Calm, non-blocking task nudges.")
+                        Text("Powered by Apple Screen Time.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -114,20 +94,68 @@ struct IOSFocusPatternsView: View {
                 .padding(.vertical, 4)
             }
 
-            // 1. Master Toggle & Preview
+            // 1. Apple Screen Time Permission & Native App Picker
+            Section {
+                if focusManager.isScreenTimeAuthorized {
+                    HStack {
+                        Label("Screen Time", systemImage: "hourglass")
+                        Spacer()
+                        Label("Connected", systemImage: "checkmark.circle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.green)
+                    }
+
+                    Button {
+                        IOSHaptics.shared.tap()
+                        showActivityPicker = true
+                    } label: {
+                        HStack {
+                            Label("Choose Apps & Websites", systemImage: "apps.iphone")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(focusManager.selectedItemsCount > 0 ? "\(focusManager.selectedItemsCount) selected" : "All Activity")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Button {
+                        IOSHaptics.shared.tap()
+                        Task { _ = await focusManager.requestScreenTimeAuthorization() }
+                    } label: {
+                        Label("Allow Apple Screen Time", systemImage: "hourglass.badge.plus")
+                            .fontWeight(.semibold)
+                    }
+
+                    if let err = focusManager.lastAuthorizationError, !err.isEmpty {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                sectionHeader("Apple Screen Time", info: .screentime)
+            }
+
+            // 2. Master Toggle & Preview
             Section {
                 Toggle("Adaptive Task Nudges", isOn: Binding(
                     get: { store.focusBehavior.isEnabled },
                     set: { val in
                         IOSHaptics.shared.toggle()
                         store.toggleFocusEnabled(val)
+                        if val {
+                            focusManager.startScreenTimeMonitoring()
+                        } else {
+                            focusManager.stopScreenTimeMonitoring()
+                        }
                     }
                 ))
 
                 Button {
                     IOSHaptics.shared.tap()
                     Task {
-                        await IOSFocusManager.shared.sendPreviewBanner(for: store)
+                        await focusManager.sendPreviewBanner(for: store)
                         withAnimation { bannerSent = true }
                         try? await Task.sleep(nanoseconds: 2_200_000_000)
                         withAnimation { bannerSent = false }
@@ -147,34 +175,17 @@ struct IOSFocusPatternsView: View {
                 sectionHeader("Focus Nudges", info: .nudges)
             }
 
-            // 2. Circadian Rhythm
+            // 3. Instant 7-Day Historical Screen Time Report (DeviceActivityReport)
             Section {
-                circadianChartRow
-            } header: {
-                sectionHeader("Circadian Rhythm · 7 Days", info: .circadian)
-            }
-
-            // 3. Observed Apps & Sites
-            Section {
-                if observedTargets.isEmpty {
-                    Text("Observing silently")
-                        .foregroundStyle(.secondary)
+                if focusManager.isScreenTimeAuthorized {
+                    DeviceActivityReport(.roweCircadianHistory, filter: sevenDayFilter)
+                        .frame(minHeight: 150)
                 } else {
-                    ForEach(observedTargets, id: \.slug) { row in
-                        HStack(spacing: 12) {
-                            Image(systemName: row.icon)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 22)
-                            Text(row.name)
-                            Spacer()
-                            Text("~\(formatMinutes(row.medianMins)) · \(row.sessions)×")
-                                .font(.footnote.monospaced())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    Text("Allow Screen Time above to load your past 7 days immediately.")
+                        .foregroundStyle(.secondary)
                 }
             } header: {
-                sectionHeader("Observed Apps & Sites", info: .observed)
+                sectionHeader("Circadian Rhythm · 7 Days", info: .circadian)
             }
 
             // 4. Learned Windows & Muted Slots
@@ -212,25 +223,7 @@ struct IOSFocusPatternsView: View {
                 sectionHeader("Learned Windows", info: .learned)
             }
 
-            // 5. iPhone 0-Second Shortcuts Automation (gated behind i button)
-            Section {
-                Button {
-                    IOSHaptics.shared.tap()
-                    activeInfo = .shortcuts
-                } label: {
-                    HStack {
-                        Label("Shortcuts 0s Setup Guide", systemImage: "bolt.horizontal")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Image(systemName: "info.circle")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } header: {
-                sectionHeader("iPhone Automation", info: .shortcuts)
-            }
-
-            // 6. Visual Work & Study Allowlist Selector
+            // 5. Work & Study Allowlist
             Section {
                 Button {
                     IOSHaptics.shared.tap()
@@ -274,6 +267,7 @@ struct IOSFocusPatternsView: View {
         .navigationTitle("Focus Patterns")
         .navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
+        .familyActivityPicker(isPresented: $showActivityPicker, selection: $focusManager.activitySelection)
         .sheet(isPresented: $showSiteSelector) {
             IOSAllowlistSelectorSheet(store: store)
         }
@@ -290,7 +284,8 @@ struct IOSFocusPatternsView: View {
             Text(topic.message)
         }
         .task {
-            await IOSFocusManager.shared.refreshNotificationStatus()
+            focusManager.refreshScreenTimeStatus()
+            await focusManager.refreshNotificationStatus()
         }
     }
 
@@ -309,81 +304,6 @@ struct IOSFocusPatternsView: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    private var circadianChartRow: some View {
-        let slots = circadianSlots
-        let maxVal = max(30.0, slots.max() ?? 30.0)
-        let peakIndex = slots.enumerated().max(by: { $0.element < $1.element })?.offset
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(totalMinutes7d > 0 ? formatMinutes(totalMinutes7d) : "Calibrating")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                if let peak = peakIndex, slots[peak] > 0 {
-                    Text("Peak \(slotRangeShort(peak))")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            HStack(alignment: .bottom, spacing: 5) {
-                ForEach(0..<12, id: \.self) { idx in
-                    let val = slots[idx]
-                    let frac = max(0.08, min(1.0, val / maxVal))
-                    let isPeak = (idx == peakIndex && val > 0)
-                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                        .fill(
-                            val > 0
-                                ? (isPeak ? accent : Color.primary.opacity(colorScheme == .dark ? 0.28 : 0.18))
-                                : Color.primary.opacity(0.08)
-                        )
-                        .frame(height: max(5, CGFloat(frac) * 56))
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: 60, alignment: .bottom)
-
-            HStack {
-                Text("12a")
-                Spacer()
-                Text("4a")
-                Spacer()
-                Text("8a")
-                Spacer()
-                Text("12p")
-                Spacer()
-                Text("4p")
-                Spacer()
-                Text("8p")
-                Spacer()
-                Text("12a")
-            }
-            .font(.caption2.monospaced())
-            .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func formatMinutes(_ mins: Int) -> String {
-        if mins >= 60 {
-            let h = mins / 60
-            let m = mins % 60
-            return m == 0 ? "\(h)h" : "\(h)h \(m)m"
-        }
-        return "\(mins)m"
-    }
-
-    private func slotRangeShort(_ idx: Int) -> String {
-        let start = idx * 2
-        let end = (start + 2) % 24
-        func f(_ h: Int) -> String {
-            if h == 0 { return "12a" }
-            if h == 12 { return "12p" }
-            return h < 12 ? "\(h)a" : "\(h - 12)p"
-        }
-        return "\(f(start))–\(f(end))"
     }
 
     private func humanLabel(forStorageKey key: String) -> String {

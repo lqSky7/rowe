@@ -27,6 +27,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: RoweIOS.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.rowe.ios
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -37,7 +38,14 @@ targets:
       - package: RoweCore
       - target: RoweWidgetExtension
         embed: true
+      - target: RoweDeviceActivityMonitor
+        embed: true
+      - target: RoweDeviceActivityReport
+        embed: true
       - sdk: ActivityKit.framework
+      - sdk: FamilyControls.framework
+      - sdk: DeviceActivity.framework
+      - sdk: ManagedSettings.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework
@@ -62,4 +70,46 @@ targets:
     dependencies:
       - sdk: ActivityKit.framework
       - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+
+  RoweDeviceActivityMonitor:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: ScreenTimeMonitor
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        INFOPLIST_FILE: ScreenTimeMonitor/Info.plist
+        CODE_SIGN_ENTITLEMENTS: RoweIOS.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.rowe.ios.screentime-monitor
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+    dependencies:
+      - sdk: DeviceActivity.framework
+      - sdk: FamilyControls.framework
+      - sdk: ManagedSettings.framework
+
+  RoweDeviceActivityReport:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: ScreenTimeReport
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        INFOPLIST_FILE: ScreenTimeReport/Info.plist
+        CODE_SIGN_ENTITLEMENTS: RoweIOS.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.rowe.ios.screentime-report
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+    dependencies:
+      - sdk: DeviceActivity.framework
+      - sdk: FamilyControls.framework
       - sdk: SwiftUI.framework

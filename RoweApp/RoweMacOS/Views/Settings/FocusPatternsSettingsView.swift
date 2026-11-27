@@ -67,7 +67,7 @@ struct FocusPatternsSettingsView: View {
             permissionsAndPrivacyFooter
         }
         .onAppear {
-            tracker.refreshAccessibilityStatus()
+            tracker.refreshScreenTimeStatus(importIfAvailable: true)
         }
         .sheet(isPresented: $showAllowlistSelector) {
             MacAllowlistSelectorSheet(store: store)
@@ -387,36 +387,49 @@ struct FocusPatternsSettingsView: View {
     private var permissionsAndPrivacyFooter: some View {
         surfaceCard {
             HStack(spacing: 12) {
-                Image(systemName: "lock.shield")
+                Image(systemName: "hourglass")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Zero-Knowledge Private by Design")
+                    Text("Apple Screen Time Data")
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(.primary)
-                    Text("PIN-locked notes are never read or suggested. Browser tab URLs are classified locally and never stored.")
+                    Text(tracker.hasScreenTimeAccess
+                         ? "Reading 30-day Apple Screen Time history locally (0% polling). PIN-locked notes are never read."
+                         : "Grant Full Disk Access so Rowe can read your existing Apple Screen Time history immediately.")
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
-                if tracker.hasAccessibilityPermission {
-                    Label("Access Granted", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.green)
+                if tracker.hasScreenTimeAccess {
+                    HStack(spacing: 8) {
+                        Button("Refresh History") {
+                            tracker.importScreenTimeHistory(daysBack: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11.5, weight: .medium))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(Capsule().fill(Color.green.opacity(0.12)))
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+
+                        Label("Screen Time Active", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.green.opacity(0.12)))
+                    }
                 } else {
                     Button {
-                        tracker.requestAccessibilityPermission()
+                        tracker.requestScreenTimeAccess()
                     } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "gearshape")
                                 .font(.system(size: 11))
-                            Text("Open Accessibility Settings")
+                            Text("Grant Screen Time Access")
                                 .font(.system(size: 11.5, weight: .semibold))
                         }
                         .foregroundStyle(.primary)

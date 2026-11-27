@@ -1,39 +1,143 @@
 import AppKit
-import ApplicationServices
-import CoreGraphics
 import Foundation
 import Observation
+import SQLite3
 import RoweCore
 
-/// Passive, zero-blocking macOS activity observer for Rowe's Adaptive Focus system.
-/// - Never blocks, locks, or steals focus from any application.
-/// - Tracks native distraction apps via `NSWorkspace` and browser distraction domains via local eTLD+1 inspection.
-/// - Applies 120s HID idle cutoff with retroactive timestamp trim, sleep/screen-lock hard stops, and YouTube `/watch` rapid-hop detection.
+/// Reads historical & recent Apple Screen Time usage directly from macOS's local
+/// Screen Time Knowledge database (`~/Library/Application Support/Knowledge/knowledgeC.db`)
+/// in read-only mode. Zero polling, zero AppleScript, instant 30-day baseline on Day 1.
+enum MacScreenTimeReader {
+    /// Core Data reference date offset (2001-01-01 00:00:00 UTC in Unix seconds).
+    private static let coreDataEpochOffset: TimeInterval = 978_307_200.0
+
+    static var knowledgeDBPath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Knowledge/knowledgeC.db")
+            .path
+    }
+
+    static var canReadScreenTimeDatabase: Bool {
+        let path = knowledgeDBPath
+        guard FileManager.default.isReadableFile(atPath: path) else { return false }
+        var db: OpaquePointer?
+        let rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
+        if let db { sqlite3_close(db) }
+        return rc == SQLITE_OK
+    }
+
+    /// Imports up to `daysBack` days of Apple Screen Time `/app/usage` and `/app/webUsage`
+    /// records (including iCloud-synced iPhone/iPad Screen Time entries stored in `knowledgeC.db`).
+    static func readHistoricalIntervals(
+        daysBack: Int = 30,
+        deviceId: String,
+        allowlistedDomains: Set<String>,
+        customTargets: [String]
+    ) -> [UsageInterval] {
+        let path = knowledgeDBPath
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
+              let db else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let cutoffUnix = Date().addingTimeInterval(-Double(daysBack) * 86400.0).timeIntervalSince1970
+        let cutoffCoreData = cutoffUnix - coreDataEpochOffset
+
+        // Read both native app usage (`/app/usage`) and Safari/Web Screen Time (`/app/webUsage`).
+        let sql = """
+            SELECT Z_PK, ZSTREAMNAME, ZVALUESTRING, ZSTARTDATE, ZENDDATE
+            FROM ZOBJECT
+            WHERE ZSTREAMNAME IN ('/app/usage', '/app/webUsage')
+              AND ZSTARTDATE >= ?
+              AND ZENDDATE > ZSTARTDATE
+              AND ZVALUESTRING IS NOT NULL
+            ORDER BY ZSTARTDATE ASC
+            LIMIT 12000;
+            """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, cutoffCoreData)
+
+        let lowerAllow = Set(allowlistedDomains.map { $0.lowercased() })
+        var results: [UsageInterval] = []
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let pk = sqlite3_column_int64(stmt, 0)
+            guard let streamC = sqlite3_column_text(stmt, 1),
+                  let valC = sqlite3_column_text(stmt, 2) else { continue }
+            let stream = String(cString: streamC)
+            let value = String(cString: valC)
+            let startCD = sqlite3_column_double(stmt, 3)
+            let endCD = sqlite3_column_double(stmt, 4)
+
+            let duration = endCD - startCD
+            guard duration >= 5.0 else { continue }
+
+            let startDate = Date(timeIntervalSince1970: startCD + coreDataEpochOffset)
+            let endDate = Date(timeIntervalSince1970: endCD + coreDataEpochOffset)
+
+            var matchedSlug: String? = nil
+            if stream == "/app/webUsage" {
+                let candidateURL = value.contains("://") ? value : "https://\(value)"
+                matchedSlug = CanonicalTargetRegistry.classifyBrowserURL(
+                    candidateURL,
+                    allowlistedDomains: lowerAllow,
+                    customTargets: customTargets
+                )?.slug
+            } else {
+                let valLower = value.lowercased()
+                if !lowerAllow.contains(valLower) {
+                    matchedSlug = CanonicalTargetRegistry.canonicalSlug(
+                        bundleId: value,
+                        appName: nil,
+                        customTargets: customTargets
+                    )
+                }
+            }
+
+            guard let slug = matchedSlug else { continue }
+
+            let interval = UsageInterval(
+                id: "st-kc-\(pk)",
+                deviceId: deviceId,
+                canonicalTarget: slug,
+                startUTC: startDate,
+                endUTC: endDate,
+                sourceFidelity: .macForeground
+            )
+            results.append(interval)
+        }
+
+        return results
+    }
+}
+
+/// 100% Apple Screen Time-backed macOS Focus coordinator:
+/// - Zero polling timers, zero AppleScript, zero Accessibility prompts.
+/// - Imports 30 days of historical Apple Screen Time data on launch so nudges are calibrated on Day 1.
+/// - Uses purely push-driven `NSWorkspace.didActivateApplicationNotification` (0% idle CPU) to offer
+///   calm, non-blocking task nudges when switching into a tracked app.
 @MainActor
 @Observable
 public final class MacFocusTracker {
     public static let shared = MacFocusTracker()
 
-    public private(set) var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
+    public private(set) var hasScreenTimeAccess: Bool = MacScreenTimeReader.canReadScreenTimeDatabase
+    public private(set) var lastImportedSessionCount: Int = 0
+    public private(set) var lastImportDate: Date? = nil
 
     @ObservationIgnored private weak var store: WorkspaceStore?
     @ObservationIgnored private var isRunning = false
-
-    @ObservationIgnored private var activeTarget: String?
-    @ObservationIgnored private var activeSessionStart: Date?
-    @ObservationIgnored private var activeBrowserHost: String?
-    @ObservationIgnored private var pollTimer: Timer?
     @ObservationIgnored private var workspaceObservers: [NSObjectProtocol] = []
-    @ObservationIgnored private var distributedObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var activeObserver: NSObjectProtocol?
-
-    // YouTube /watch rapid-hop detector: (videoId, firstSeenUTC) within rolling 10-minute window
-    @ObservationIgnored private var recentYouTubeVideos: [(id: String, seenAt: Date)] = []
-    @ObservationIgnored private var lastNudgedTargetSessionStart: Date?
-
-    private static let idleCutoffSeconds: TimeInterval = 120.0
-    private static let rapidHopWindowSeconds: TimeInterval = 10 * 60
-    private static let rapidHopThreshold = 3
+    @ObservationIgnored private var lastNudgedBundleId: String?
+    @ObservationIgnored private var lastNudgedAt: Date = .distantPast
 
     private init() {
         activeObserver = NotificationCenter.default.addObserver(
@@ -41,257 +145,129 @@ public final class MacFocusTracker {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.refreshAccessibilityStatus() }
+            Task { @MainActor in
+                self?.refreshScreenTimeStatus(importIfAvailable: true)
+            }
         }
     }
 
     public func start(with store: WorkspaceStore) {
         self.store = store
-        refreshAccessibilityStatus()
+        refreshScreenTimeStatus(importIfAvailable: true)
         guard !isRunning else { return }
         isRunning = true
 
+        // Purely event-driven app activation observer (0% CPU when idle, no polling timers).
         let wsCenter = NSWorkspace.shared.notificationCenter
         workspaceObservers.append(
-            wsCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.evaluateFrontmostContext() }
+            wsCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                Task { @MainActor in
+                    self?.handleAppActivated(app)
+                }
             }
         )
-        workspaceObservers.append(
-            wsCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.flushCurrentSession(endTime: Date()) }
-            }
-        )
-        workspaceObservers.append(
-            wsCenter.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.flushCurrentSession(endTime: Date()) }
-            }
-        )
-        workspaceObservers.append(
-            NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.flushCurrentSession(endTime: Date()) }
-            }
-        )
-        distributedObservers.append(
-            DistributedNotificationCenter.default().addObserver(
-                forName: NSNotification.Name("com.apple.screenIsLocked"),
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in self?.flushCurrentSession(endTime: Date()) }
-            }
-        )
-
-        // Lightweight 20s heartbeat: checks HID idle, browser tab switches, and flushes long sessions safely.
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 20.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.heartbeatTick() }
-        }
-        evaluateFrontmostContext()
     }
 
     public func stop() {
-        flushCurrentSession(endTime: Date())
-        pollTimer?.invalidate()
-        pollTimer = nil
         let wsCenter = NSWorkspace.shared.notificationCenter
         for obs in workspaceObservers {
             wsCenter.removeObserver(obs)
-            NotificationCenter.default.removeObserver(obs)
         }
         workspaceObservers.removeAll()
-        for obs in distributedObservers {
-            DistributedNotificationCenter.default().removeObserver(obs)
-        }
-        distributedObservers.removeAll()
         isRunning = false
     }
 
-    public func refreshAccessibilityStatus() {
-        hasAccessibilityPermission = AXIsProcessTrusted()
+    public func refreshScreenTimeStatus(importIfAvailable: Bool = false) {
+        let readable = MacScreenTimeReader.canReadScreenTimeDatabase
+        hasScreenTimeAccess = readable
+        if readable && importIfAvailable {
+            importScreenTimeHistory()
+        }
     }
 
-    public func requestAccessibilityPermission() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+    /// Opens macOS System Settings directly to Privacy & Security -> Full Disk Access
+    /// so Rowe can read Apple's local Screen Time database (`knowledgeC.db`).
+    public func requestScreenTimeAccess() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
             NSWorkspace.shared.open(url)
         }
-        refreshAccessibilityStatus()
+        refreshScreenTimeStatus(importIfAvailable: true)
     }
 
-    // MARK: - Heartbeat & Context Evaluation
-
-    private func heartbeatTick() {
-        guard let store, store.focusBehavior.isEnabled else {
-            flushCurrentSession(endTime: Date())
+    /// Reads the last 30 days of Apple Screen Time history and merges any new sessions into `WorkspaceStore`.
+    public func importScreenTimeHistory(daysBack: Int = 30) {
+        guard let store else { return }
+        guard MacScreenTimeReader.canReadScreenTimeDatabase else {
+            hasScreenTimeAccess = false
             return
         }
+        hasScreenTimeAccess = true
 
-        let idleSeconds = currentHIDIdleSeconds()
-        if idleSeconds >= Self.idleCutoffSeconds {
-            // Retroactively trim the session to the exact moment the user stopped interacting.
-            let trueEnd = Date().addingTimeInterval(-idleSeconds)
-            flushCurrentSession(endTime: trueEnd)
-            return
+        let deviceId = store.deviceId
+        let allowlist = Set(store.focusBehavior.allowlistedDomains)
+        let customTargets = store.focusBehavior.customDistractionTargets
+
+        Task.detached(priority: .utility) {
+            let imported = MacScreenTimeReader.readHistoricalIntervals(
+                daysBack: daysBack,
+                deviceId: deviceId,
+                allowlistedDomains: allowlist,
+                customTargets: customTargets
+            )
+            await MainActor.run { [weak self] in
+                guard let self, let store = self.store else { return }
+                let existingIds = Set(store.focusBehavior.intervals.map(\.id))
+                var added = 0
+                for interval in imported where !existingIds.contains(interval.id) {
+                    store.recordFocusInterval(interval)
+                    added += 1
+                }
+                self.lastImportedSessionCount = imported.count
+                self.lastImportDate = Date()
+                if added > 0 {
+                    // Already persisted via recordFocusInterval
+                }
+            }
         }
-
-        evaluateFrontmostContext()
     }
 
-    private func evaluateFrontmostContext() {
-        guard let store, store.focusBehavior.isEnabled else {
-            flushCurrentSession(endTime: Date())
-            return
-        }
-        guard let frontApp = NSWorkspace.shared.frontmostApplication,
-              let bundleId = frontApp.bundleIdentifier else {
-            flushCurrentSession(endTime: Date())
+    private func handleAppActivated(_ frontApp: NSRunningApplication?) {
+        guard let store, store.focusBehavior.isEnabled else { return }
+        guard let app = frontApp ?? NSWorkspace.shared.frontmostApplication,
+              let bundleId = app.bundleIdentifier,
+              bundleId != Bundle.main.bundleIdentifier else {
             return
         }
 
-        // Ignore Rowe itself
-        if bundleId == Bundle.main.bundleIdentifier {
-            flushCurrentSession(endTime: Date())
+        // Refresh latest Screen Time history silently on app switch (throttled to every 5 mins)
+        if hasScreenTimeAccess, Date().timeIntervalSince(lastImportDate ?? .distantPast) > 300 {
+            importScreenTimeHistory(daysBack: 7)
+        }
+
+        let allowlist = Set(store.focusBehavior.allowlistedDomains.map { $0.lowercased() })
+        let appLower = app.localizedName?.lowercased() ?? ""
+        if allowlist.contains(appLower) || allowlist.contains(bundleId.lowercased()) {
+            return
+        }
+
+        guard let slug = CanonicalTargetRegistry.canonicalSlug(
+            bundleId: bundleId,
+            appName: app.localizedName,
+            customTargets: store.focusBehavior.customDistractionTargets
+        ) else {
             return
         }
 
         let now = Date()
-        let allowlist = Set(store.focusBehavior.allowlistedDomains)
-        let customTargets = store.focusBehavior.customDistractionTargets
-
-        var detectedTarget: String? = nil
-        var isYouTubeWatch = false
-        var rawURLForHop: String? = nil
-
-        if CanonicalTargetRegistry.isBrowser(bundleId: bundleId) {
-            if let urlStr = activeBrowserURL(for: bundleId) {
-                rawURLForHop = urlStr
-                if let classified = CanonicalTargetRegistry.classifyBrowserURL(
-                    urlStr,
-                    allowlistedDomains: allowlist,
-                    customTargets: customTargets
-                ) {
-                    detectedTarget = classified.slug
-                    isYouTubeWatch = classified.isYouTubeWatch
-                }
-            }
-        } else {
-            let appLower = frontApp.localizedName?.lowercased() ?? ""
-            if allowlist.contains(appLower) || allowlist.contains(bundleId.lowercased()) {
-                detectedTarget = nil
-            } else {
-                detectedTarget = CanonicalTargetRegistry.canonicalSlug(
-                    bundleId: bundleId,
-                    appName: frontApp.localizedName,
-                    customTargets: customTargets
-                )
-            }
-        }
-
-        // Track YouTube /watch rapid-hopping vs focused lecture viewing
-        if let slug = detectedTarget, slug == "canon:youtube", isYouTubeWatch, let urlStr = rawURLForHop {
-            if let videoId = extractYouTubeVideoId(from: urlStr) {
-                let cutoff = now.addingTimeInterval(-Self.rapidHopWindowSeconds)
-                recentYouTubeVideos = recentYouTubeVideos.filter { $0.seenAt >= cutoff }
-                if !recentYouTubeVideos.contains(where: { $0.id == videoId }) {
-                    recentYouTubeVideos.append((id: videoId, seenAt: now))
-                }
-                // Under 3 distinct videos in 10 minutes -> assume focused tutorial/lecture; don't nudge yet
-                if recentYouTubeVideos.count < Self.rapidHopThreshold {
-                    transitionSession(to: detectedTarget, at: now, allowNudge: false)
-                    return
-                }
-            }
-        }
-
-        transitionSession(to: detectedTarget, at: now, allowNudge: true)
-    }
-
-    private func transitionSession(to newTarget: String?, at now: Date, allowNudge: Bool) {
-        if activeTarget != newTarget {
-            flushCurrentSession(endTime: now)
-            activeTarget = newTarget
-            activeSessionStart = newTarget == nil ? nil : now
-            lastNudgedTargetSessionStart = nil
-        }
-
-        guard allowNudge,
-              let target = activeTarget,
-              let sessionStart = activeSessionStart,
-              lastNudgedTargetSessionStart != sessionStart,
-              let store else {
+        if lastNudgedBundleId == bundleId && now.timeIntervalSince(lastNudgedAt) < 120 {
             return
         }
 
-        // Evaluate non-blocking nudge proposal
-        if let suggestion = store.evaluateFocusNudge(for: target, at: now) {
-            lastNudgedTargetSessionStart = sessionStart
+        if let suggestion = store.evaluateFocusNudge(for: slug, at: now) {
+            lastNudgedBundleId = bundleId
+            lastNudgedAt = now
             FocusNudgeHUDController.shared.show(suggestion: suggestion, store: store)
         }
-    }
-
-    private func flushCurrentSession(endTime: Date) {
-        guard let target = activeTarget,
-              let start = activeSessionStart,
-              let store else {
-            activeTarget = nil
-            activeSessionStart = nil
-            return
-        }
-        activeTarget = nil
-        activeSessionStart = nil
-
-        let clampedEnd = max(start, endTime)
-        guard clampedEnd.timeIntervalSince(start) >= 5.0 else { return }
-
-        let interval = UsageInterval(
-            deviceId: store.deviceId,
-            canonicalTarget: target,
-            startUTC: start,
-            endUTC: clampedEnd,
-            sourceFidelity: .macForeground
-        )
-        store.recordFocusInterval(interval)
-    }
-
-    // MARK: - Local Browser Domain Inspection (Never Stored)
-
-    private func activeBrowserURL(for bundleId: String) -> String? {
-        let scriptSource: String?
-        switch bundleId {
-        case "com.apple.Safari":
-            scriptSource = "tell application \"Safari\" to if (count of documents) > 0 then return URL of current tab of front window"
-        case "com.google.Chrome", "com.google.Chrome.canary":
-            scriptSource = "tell application \"Google Chrome\" to if (count of windows) > 0 then return URL of active tab of front window"
-        case "company.thebrowser.Browser":
-            scriptSource = "tell application \"Arc\" to if (count of windows) > 0 then return URL of active tab of front window"
-        case "com.brave.Browser":
-            scriptSource = "tell application \"Brave Browser\" to if (count of windows) > 0 then return URL of active tab of front window"
-        case "com.microsoft.edgemac":
-            scriptSource = "tell application \"Microsoft Edge\" to if (count of windows) > 0 then return URL of active tab of front window"
-        case "com.vivaldi.Vivaldi":
-            scriptSource = "tell application \"Vivaldi\" to if (count of windows) > 0 then return URL of active tab of front window"
-        case "com.kagi.kagimacOS":
-            scriptSource = "tell application \"Orion\" to if (count of documents) > 0 then return URL of current tab of front window"
-        default:
-            scriptSource = nil
-        }
-
-        guard let source = scriptSource, let script = NSAppleScript(source: source) else { return nil }
-        var errorDict: NSDictionary?
-        let descriptor = script.executeAndReturnError(&errorDict)
-        return descriptor.stringValue
-    }
-
-    private func extractYouTubeVideoId(from rawURL: String) -> String? {
-        guard let comps = URLComponents(string: rawURL) else { return nil }
-        if let v = comps.queryItems?.first(where: { $0.name == "v" })?.value, !v.isEmpty {
-            return v
-        }
-        return nil
-    }
-
-    private func currentHIDIdleSeconds() -> TimeInterval {
-        CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
     }
 }

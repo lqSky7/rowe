@@ -3,7 +3,8 @@ import UserNotifications
 import RoweCore
 #if os(macOS)
 import AppKit
-import ApplicationServices
+#elseif os(iOS)
+import FamilyControls
 #endif
 
 /// Smoothed Rowe ribbon mark rendered as a SwiftUI Shape — ideal for GlassGlow Metal shader surfaces.
@@ -69,7 +70,7 @@ public struct RoweOnboardingView: View {
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var notificationsGranted = false
-    @State private var accessibilityGranted = false
+    @State private var screenTimeGranted = false
     @FocusState private var focusedField: OnboardingField?
     @Namespace private var modePillNS
 
@@ -317,7 +318,7 @@ public struct RoweOnboardingView: View {
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.center)
 
-                Text("Observes scroll patterns locally to suggest a quick task before long sessions — never blocking apps or reading locked notes.")
+                Text("Reads your Apple Screen Time rhythm to suggest a quick task before long sessions — never blocking apps or reading locked notes.")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -328,22 +329,20 @@ public struct RoweOnboardingView: View {
 
             HStack(spacing: 10) {
                 minimalPermissionPill(
+                    title: screenTimeGranted ? "Screen Time On" : "Allow Screen Time",
+                    icon: screenTimeGranted ? "checkmark" : "hourglass",
+                    isGranted: screenTimeGranted
+                ) {
+                    requestScreenTime()
+                }
+
+                minimalPermissionPill(
                     title: notificationsGranted ? "Notifications On" : "Allow Notifications",
                     icon: notificationsGranted ? "checkmark" : "bell",
                     isGranted: notificationsGranted
                 ) {
                     requestNotifications()
                 }
-
-                #if os(macOS)
-                minimalPermissionPill(
-                    title: accessibilityGranted ? "Accessibility On" : "Enable Accessibility",
-                    icon: accessibilityGranted ? "checkmark" : "hand.raised",
-                    isGranted: accessibilityGranted
-                ) {
-                    requestMacAccessibility()
-                }
-                #endif
             }
             .padding(.top, 4)
         }
@@ -388,7 +387,11 @@ public struct RoweOnboardingView: View {
             }
         }
         #if os(macOS)
-        accessibilityGranted = AXIsProcessTrusted()
+        let dbPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Knowledge/knowledgeC.db").path
+        screenTimeGranted = FileManager.default.isReadableFile(atPath: dbPath)
+        #elseif os(iOS)
+        screenTimeGranted = AuthorizationCenter.shared.authorizationStatus == .approved
         #endif
     }
 
@@ -401,16 +404,21 @@ public struct RoweOnboardingView: View {
         }
     }
 
-    #if os(macOS)
-    private func requestMacAccessibility() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+    private func requestScreenTime() {
+        #if os(macOS)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
             NSWorkspace.shared.open(url)
         }
-        accessibilityGranted = AXIsProcessTrusted()
+        refreshPermissions()
+        #elseif os(iOS)
+        Task {
+            try? await AuthorizationCenter.shared.requestAuthorization(for: .individual)
+            await MainActor.run {
+                screenTimeGranted = AuthorizationCenter.shared.authorizationStatus == .approved
+            }
+        }
+        #endif
     }
-    #endif
 
     private var integratedAuthSlide: some View {
         VStack(spacing: 18) {
