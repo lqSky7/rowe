@@ -18,6 +18,7 @@ struct ScreenTimeHistorySummary: Sendable {
 }
 
 @main
+@MainActor
 struct RoweDeviceActivityReportExtension: DeviceActivityReportExtension {
     var body: some DeviceActivityReportScene {
         RoweCircadianHistoryScene { summary in
@@ -29,6 +30,7 @@ struct RoweDeviceActivityReportExtension: DeviceActivityReportExtension {
 /// Reads existing historical Apple Screen Time data directly from `DeviceActivityResults`
 /// so Rowe's 7-day circadian rhythm & top apps are immediately populated on Day 1.
 @MainActor
+@preconcurrency
 struct RoweCircadianHistoryScene: DeviceActivityReportScene {
     let context: DeviceActivityReport.Context = .roweCircadianHistory
     let content: (ScreenTimeHistorySummary) -> RoweCircadianHistoryReportView
