@@ -70,18 +70,7 @@ struct IOSSettingsView: View {
                             store.pinPromptRequest = .setupPin(lockDocumentId: nil)
                         }
                     } label: {
-                        HStack(spacing: 14) {
-                            RoweGlassGlowArtworkView(kind: .vaultLock, size: 28, speed: 0.7, glow: 0.9)
-                            Text(store.hasVaultPin ? "Security · PIN Lock On" : "Security · Set Up PIN")
-                                .font(.system(size: 16.5))
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.vertical, 12)
-                        .contentShape(Rectangle())
+                        settingsRow(store.hasVaultPin ? "Security · PIN Lock On" : "Security · Set Up PIN", icon: "lock")
                     }
                     .buttonStyle(.plain)
                     Divider().opacity(0.2).padding(.leading, 42)
