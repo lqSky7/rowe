@@ -54,12 +54,17 @@ public struct RoweOnboardingView: View {
     var onSignInRequested: () -> Void
     var onFinish: () -> Void
 
+    private enum OnboardingField: Hashable {
+        case displayName, email, password
+    }
+
     @State private var step: Int = 0
     @State private var appeared = false
     @State private var isRegisterMode = false
     @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var password: String = ""
+    @FocusState private var focusedField: OnboardingField?
     @Namespace private var modePillNS
 
     public static let monochromePalette = GlassGlowPalette(
@@ -340,6 +345,9 @@ public struct RoweOnboardingView: View {
                     authFieldRow(icon: "person") {
                         TextField("Your name", text: $displayName)
                             .textFieldStyle(.plain)
+                            .focused($focusedField, equals: .displayName)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .email }
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
@@ -351,15 +359,23 @@ public struct RoweOnboardingView: View {
                         .textInputAutocapitalization(.never)
                         .keyboardType(.emailAddress)
                         .autocorrectionDisabled()
+                        .focused($focusedField, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .password }
                     #else
                     TextField("Email address", text: $email)
                         .textFieldStyle(.plain)
+                        .focused($focusedField, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .password }
                     #endif
                 }
 
                 authFieldRow(icon: "lock") {
                     SecureField(isRegisterMode ? "Create password (8+ chars)" : "Password", text: $password)
                         .textFieldStyle(.plain)
+                        .focused($focusedField, equals: .password)
+                        .submitLabel(.go)
                         .onSubmit { submitAuth() }
                 }
             }

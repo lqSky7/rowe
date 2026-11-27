@@ -5,6 +5,7 @@ enum SettingsCategory: String, CaseIterable {
     case spaceSettings = "Space Settings"
     case stats = "Stats"
     case appearance = "Appearance & Sound"
+    case focusPatterns = "Focus Patterns"
     case advanced = "Advanced"
     case account = "Account Settings"
     case notifications = "Notifications"
@@ -16,6 +17,7 @@ enum SettingsCategory: String, CaseIterable {
         case .spaceSettings: "gearshape"
         case .stats: "chart.pie"
         case .appearance: "textformat"
+        case .focusPatterns: "waveform.and.magnifyingglass"
         case .advanced: "slider.horizontal.3"
         case .account: "person"
         case .notifications: "bell"
@@ -66,6 +68,7 @@ struct SettingsView: View {
                         case .spaceSettings: spaceSettingsBody
                         case .stats: statsBody
                         case .appearance: appearanceBody
+                        case .focusPatterns: FocusPatternsSettingsView(store: store)
                         case .advanced: advancedBody
                         case .account: accountBody
                         case .notifications: notificationsBody
@@ -114,6 +117,7 @@ struct SettingsView: View {
 
                 settingsGroupHeader("General Settings")
                 settingsNavRow(.appearance)
+                settingsNavRow(.focusPatterns)
                 settingsNavRow(.advanced)
 
                 settingsGroupHeader("Your Account")

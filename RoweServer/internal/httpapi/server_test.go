@@ -177,4 +177,32 @@ func TestEndToEndAuthVaultAndZeroKnowledgeSync(t *testing.T) {
 			}
 		}
 	}
+
+	// 8. Adaptive Focus State round-trip (GET empty -> PUT -> GET persisted)
+	emptyFocus := doJSON(t, handler, http.MethodGet, "/api/v1/focus/state", token, nil)
+	if emptyFocus.Code != http.StatusOK {
+		t.Fatalf("get empty focus state expected 200, got %d", emptyFocus.Code)
+	}
+	sampleFocusJSON := `{"isEnabled":true,"intervals":[{"id":"i1","deviceId":"mac-1","canonicalTarget":"canon:instagram"}]}`
+	putFocus := doJSON(t, handler, http.MethodPut, "/api/v1/focus/state", token, map[string]any{
+		"stateJson": sampleFocusJSON,
+		"updatedAt": time.Now().UTC().UnixMilli(),
+	})
+	if putFocus.Code != http.StatusOK {
+		t.Fatalf("put focus state expected 200, got %d: %s", putFocus.Code, putFocus.Body.String())
+	}
+	getFocus := doJSON(t, handler, http.MethodGet, "/api/v1/focus/state", token, nil)
+	if getFocus.Code != http.StatusOK {
+		t.Fatalf("get focus state expected 200, got %d", getFocus.Code)
+	}
+	var focusResp struct {
+		StateJSON string `json:"stateJson"`
+		UpdatedAt int64  `json:"updatedAt"`
+	}
+	if err := json.Unmarshal(getFocus.Body.Bytes(), &focusResp); err != nil {
+		t.Fatalf("decode focus state: %v", err)
+	}
+	if focusResp.StateJSON != sampleFocusJSON || focusResp.UpdatedAt == 0 {
+		t.Fatalf("unexpected focus state response: %+v", focusResp)
+	}
 }

@@ -145,11 +145,29 @@ public final class WorkspaceStore {
     public var syncPulseDirection: SyncPulseDirection? = nil
     public var hasLoadedFromDisk: Bool = false
     public var isSyncing: Bool = false
+    public var isRealtimeSyncConnected: Bool = false
     private var dirtyDocumentIds: Set<String> = []
     private var lastSyncServerTimeMs: Int64 = 0
     private var syncDebounceTask: Task<Void, Never>?
+    private var focusSyncDebounceTask: Task<Void, Never>?
+    private var sseStreamTask: Task<Void, Never>?
     private var firstDirtyAt: Date?
     private var consecutiveSyncFailures: Int = 0
+
+    // Adaptive Focus & Behavioral Nudge System (Zero Blocking, Cross-Device)
+    public var focusBehavior: FocusBehaviorState = FocusBehaviorState()
+    public var activeFocusSuggestion: FocusSuggestion? = nil
+    public let deviceId: String = {
+        let key = "rowe.stableDeviceId"
+        if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty {
+            return existing
+        }
+        let fresh = UUID().uuidString
+        UserDefaults.standard.set(fresh, forKey: key)
+        return fresh
+    }()
+    private let focusEngine = FocusNudgeEngine()
+    private let focusEstimator = FocusIntelligenceEstimator()
 
     // Zero-Knowledge PIN-Locked Notes (vaultKey & unlockedDocumentIds stay strictly in RAM)
     public var vaultEnvelope: VaultKeyEnvelope?
@@ -199,7 +217,11 @@ public final class WorkspaceStore {
         self.documents = seed.documents
         self.sharedDocuments = seed.sharedDocuments
         self.connections = seed.connections
-        self.settings = seed.settings
+        var initialSettings = seed.settings
+        if UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding") {
+            initialSettings.hasCompletedOnboarding = true
+        }
+        self.settings = initialSettings
 
         let initialTab = BrowserTab(destination: .allDocs)
         self.tabs = [initialTab]
@@ -247,10 +269,12 @@ public final class WorkspaceStore {
             }
             self.connections = loaded.connections
             self.settings = loaded.settings
+            UserDefaults.standard.set(loaded.settings.hasCompletedOnboarding, forKey: "rowe.hasCompletedOnboarding")
             self.vaultEnvelope = loaded.vaultEnvelope
             self.authSession = loaded.authSession
             self.lastSyncServerTimeMs = loaded.lastSyncServerTimeMs
             self.dirtyDocumentIds = Set(loaded.dirtyDocumentIds)
+            self.focusBehavior = loaded.focusBehavior
             if let savedURL = loaded.serverURL,
                !savedURL.isEmpty,
                savedURL != "http://localhost:8080" || loaded.authSession?.serverURL == "http://localhost:8080" {
@@ -275,6 +299,7 @@ public final class WorkspaceStore {
         self.hasLoadedFromDisk = true
 
         if self.authSession != nil {
+            startRealtimeSyncStream()
             Task {
                 await self.refreshSessionAndSync()
             }
@@ -284,6 +309,11 @@ public final class WorkspaceStore {
     // MARK: - Navigation & Tabs
 
     public func navigate(to destination: WorkspaceDestination, recordHistory: Bool = true) {
+        if case .document(let previousDocId) = currentDestination,
+           destination != .document(previousDocId) {
+            pruneEmptyDocumentIfNeeded(docId: previousDocId)
+        }
+
         if let idx = tabs.firstIndex(where: { $0.id == activeTabId }) {
             tabs[idx].destination = destination
         } else {
@@ -368,6 +398,27 @@ public final class WorkspaceStore {
 
     // MARK: - Document CRUD
 
+    public func isDocumentEmpty(_ doc: RoweDocument) -> Bool {
+        guard !doc.isLocked, doc.encryptedPayload == nil, !doc.isTrashed else { return false }
+        if !doc.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+        return doc.blocks.allSatisfy { block in
+            block.kind == .text &&
+            block.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            block.subblocks.isEmpty &&
+            block.tableData == nil &&
+            block.collectionData == nil
+        }
+    }
+
+    /// Discards completely blank untitled notes so empty drafts are never saved or synced.
+    public func pruneEmptyDocumentIfNeeded(docId: String) {
+        guard let doc = documents.first(where: { $0.id == docId }), isDocumentEmpty(doc) else { return }
+        dirtyDocumentIds.remove(docId)
+        documents.removeAll(where: { $0.id == docId })
+        schedulePersistence()
+        rebuildSearchIndex()
+    }
+
     @discardableResult
     public func createDocument(title: String = "", folderId: String? = nil, style: DocumentStyle = DocumentStyle(), openImmediately: Bool = true) -> RoweDocument {
         let docId = UUID().uuidString
@@ -382,40 +433,15 @@ public final class WorkspaceStore {
             authorName: space.authorName
         )
         documents.insert(doc, at: 0)
-        persistAndReindex(doc)
+        // Only persist/sync non-empty documents immediately; blank notes stay transient until edited.
+        if !isDocumentEmpty(doc) {
+            persistAndReindex(doc)
+        }
         if openImmediately {
             navigate(to: .document(doc.id))
             activeBlockId = initialBlock.id
         }
         return doc
-    }
-
-    public func openOrCreateDailyNote(for date: Date = Date()) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        let key = formatter.string(from: date)
-
-        if let existing = documents.first(where: { $0.dailyNoteDateKey == key && !$0.isTrashed }) {
-            navigate(to: .document(existing.id))
-            return
-        }
-
-        let displayFormatter = DateFormatter()
-        displayFormatter.dateFormat = "EEE, d MMM"
-        let title = displayFormatter.string(from: date)
-        let docId = UUID().uuidString
-        let doc = RoweDocument(
-            id: docId,
-            spaceId: space.id,
-            title: title,
-            blocks: [Block(documentId: docId, content: "")],
-            isDailyNote: true,
-            dailyNoteDateKey: key,
-            authorName: space.authorName
-        )
-        documents.insert(doc, at: 0)
-        persistAndReindex(doc)
-        navigate(to: .document(doc.id))
     }
 
     public func updateDocumentTitle(docId: String, title: String) {
@@ -462,7 +488,7 @@ public final class WorkspaceStore {
         guard let idx = documents.firstIndex(where: { $0.id == docId }) else { return }
         documents[idx].isTrashed = true
         documents[idx].updatedAt = Date()
-        persistAndReindex(documents[idx])
+        persistAndReindex(documents[idx], fastSync: true)
         if case .document(let currentId) = currentDestination, currentId == docId {
             navigate(to: .allDocs)
         }
@@ -472,7 +498,7 @@ public final class WorkspaceStore {
         guard let idx = documents.firstIndex(where: { $0.id == docId }) else { return }
         documents[idx].isTrashed = false
         documents[idx].updatedAt = Date()
-        persistAndReindex(documents[idx])
+        persistAndReindex(documents[idx], fastSync: true)
     }
 
     public func permanentlyDeleteDocument(docId: String) {
@@ -1225,6 +1251,7 @@ public final class WorkspaceStore {
             block.listStyle = .todo
             block.task?.applyStateTransition(to: state)
         }
+        scheduleDebouncedCloudSync(delayOverride: 0.4)
     }
 
     @discardableResult
@@ -1257,7 +1284,12 @@ public final class WorkspaceStore {
         mutateBlocks(in: inboxDoc.id) { blocks in
             blocks.append(block)
         }
-        return ResolvedTaskItem(block: block, documentId: inboxDoc.id, documentTitle: inboxDoc.displayTitle, isInbox: true)
+        scheduleDebouncedCloudSync(delayOverride: 0.4)
+        let item = ResolvedTaskItem(block: block, documentId: inboxDoc.id, documentTitle: inboxDoc.displayTitle, isInbox: true)
+        if !inboxDoc.isLocked, let candidate = NudgeCandidateTask(from: item, in: inboxDoc) {
+            Task { await self.estimateAndCacheDuration(for: candidate) }
+        }
+        return item
     }
 
     // MARK: - Folders, Connections, Settings
@@ -1345,10 +1377,10 @@ public final class WorkspaceStore {
         }
     }
 
-    public func addConnection(kind: ConnectionKind, name: String? = nil) -> ConnectionItem {
+    public func makeDraftConnection(kind: ConnectionKind, name: String? = nil) -> ConnectionItem {
         let defaultName = kind == .mcp ? "MCP for All Documents" : "API for Workspace"
         let slug = UUID().uuidString.prefix(8).lowercased()
-        let item = ConnectionItem(
+        return ConnectionItem(
             kind: kind,
             name: name ?? defaultName,
             endpointURL: "https://connect.rowe.local/\(kind == .mcp ? "mcp" : "api")/\(slug)",
@@ -1356,6 +1388,19 @@ public final class WorkspaceStore {
             permission: .readAndWrite,
             accessMode: kind == .mcp ? .localOnly : .publicAccess
         )
+    }
+
+    public func saveConnection(_ item: ConnectionItem) {
+        if let idx = connections.firstIndex(where: { $0.id == item.id }) {
+            connections[idx] = item
+        } else {
+            connections.append(item)
+        }
+        schedulePersistence()
+    }
+
+    public func addConnection(kind: ConnectionKind, name: String? = nil) -> ConnectionItem {
+        let item = makeDraftConnection(kind: kind, name: name)
         connections.append(item)
         schedulePersistence()
         return item
@@ -1380,6 +1425,7 @@ public final class WorkspaceStore {
     public func updateSettings(_ mutate: (inout AppSettings) -> Void) {
         let prevLimit = settings.searchCacheLimit
         mutate(&settings)
+        UserDefaults.standard.set(settings.hasCompletedOnboarding, forKey: "rowe.hasCompletedOnboarding")
         if settings.searchCacheLimit != prevLimit {
             let limit = settings.searchCacheLimit
             Task {
@@ -1557,6 +1603,9 @@ public final class WorkspaceStore {
     }
 
     public func handleAppBecameActive() {
+        if isSignedIn && sseStreamTask == nil {
+            startRealtimeSyncStream()
+        }
         triggerSyncNow()
     }
 
@@ -1590,9 +1639,9 @@ public final class WorkspaceStore {
         }
     }
 
-    private func persistAndReindex(_ doc: RoweDocument) {
+    private func persistAndReindex(_ doc: RoweDocument, fastSync: Bool = false) {
         dirtyDocumentIds.insert(doc.id)
-        scheduleDebouncedCloudSync()
+        scheduleDebouncedCloudSync(delayOverride: fastSync ? 0.4 : nil)
         let snapshot = makeSnapshot()
         let docs = self.documents
         Task {
@@ -1604,12 +1653,12 @@ public final class WorkspaceStore {
     }
 
     /// Coalesces rapid typing into a single delta sync (4.0s trailing debounce, 20s max-wait ceiling).
-    private func scheduleDebouncedCloudSync() {
+    private func scheduleDebouncedCloudSync(delayOverride: Double? = nil) {
         guard isSignedIn else { return }
         let now = Date()
         if firstDirtyAt == nil { firstDirtyAt = now }
         let elapsed = now.timeIntervalSince(firstDirtyAt ?? now)
-        let delaySeconds: Double = elapsed >= 20.0 ? 0.5 : 4.0
+        let delaySeconds: Double = delayOverride ?? (elapsed >= 20.0 ? 0.5 : 4.0)
 
         syncDebounceTask?.cancel()
         syncDebounceTask = Task { @MainActor [weak self] in
@@ -1649,6 +1698,7 @@ public final class WorkspaceStore {
             let resp = try await backendClient.register(serverURL: normalizedURL, email: email, password: password, displayName: displayName)
             self.serverURL = normalizedURL
             self.authSession = AuthSession(serverURL: normalizedURL, accessToken: resp.accessToken, refreshToken: resp.refreshToken, user: resp.user)
+            self.lastSyncServerTimeMs = 0
             self.space.authorName = resp.user.displayName
             self.space.email = resp.user.email
             if let remoteAvatar = resp.user.avatarBase64, !remoteAvatar.isEmpty {
@@ -1663,7 +1713,8 @@ public final class WorkspaceStore {
             }
             self.isLoginSheetPresented = false
             schedulePersistence()
-            await syncWithBackend()
+            startRealtimeSyncStream()
+            await syncWithBackend(forceFullPull: true)
         } catch {
             authErrorMessage = error.localizedDescription
         }
@@ -1678,6 +1729,7 @@ public final class WorkspaceStore {
             let resp = try await backendClient.login(serverURL: normalizedURL, email: email, password: password)
             self.serverURL = normalizedURL
             self.authSession = AuthSession(serverURL: normalizedURL, accessToken: resp.accessToken, refreshToken: resp.refreshToken, user: resp.user)
+            self.lastSyncServerTimeMs = 0
             self.space.authorName = resp.user.displayName
             self.space.email = resp.user.email
             if let remoteAvatar = resp.user.avatarBase64, !remoteAvatar.isEmpty {
@@ -1692,20 +1744,62 @@ public final class WorkspaceStore {
             }
             self.isLoginSheetPresented = false
             schedulePersistence()
-            await syncWithBackend()
+            startRealtimeSyncStream()
+            await syncWithBackend(forceFullPull: true)
         } catch {
             authErrorMessage = error.localizedDescription
         }
     }
 
     public func signOut() async {
+        stopRealtimeSyncStream()
         if let sess = authSession {
             await backendClient.logout(serverURL: sess.serverURL, refreshToken: sess.refreshToken)
         }
         authSession = nil
+        lastSyncServerTimeMs = 0
         lastSyncStatusMessage = "Signed out"
         relockAllDocuments()
         schedulePersistence()
+    }
+
+    public func startRealtimeSyncStream() {
+        guard isSignedIn else { return }
+        sseStreamTask?.cancel()
+        sseStreamTask = Task { @MainActor [weak self] in
+            var retryDelay: Double = 2.0
+            while !Task.isCancelled {
+                guard let self, self.isSignedIn else { return }
+                do {
+                    let sess = try await self.withAuthorizedSession { $0 }
+                    self.isRealtimeSyncConnected = true
+                    retryDelay = 2.0
+                    try await self.backendClient.streamSyncEvents(
+                        serverURL: sess.serverURL,
+                        accessToken: sess.accessToken
+                    ) { [weak self] evt in
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            if evt.type == "focus.updated" {
+                                Task { await self.syncFocusStateWithBackend() }
+                            } else {
+                                Task { await self.syncWithBackend() }
+                            }
+                        }
+                    }
+                } catch {
+                    self.isRealtimeSyncConnected = false
+                }
+                try? await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+                retryDelay = min(30.0, retryDelay * 1.8)
+            }
+        }
+    }
+
+    public func stopRealtimeSyncStream() {
+        sseStreamTask?.cancel()
+        sseStreamTask = nil
+        isRealtimeSyncConnected = false
     }
 
     private func withAuthorizedSession<T>(_ operation: @Sendable (AuthSession) async throws -> T) async throws -> T {
@@ -1756,6 +1850,33 @@ public final class WorkspaceStore {
         await syncWithBackend()
     }
 
+    private static func makeFractionalISO8601Decoder() -> JSONDecoder {
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let str = try container.decode(String.self)
+            let withFrac = ISO8601DateFormatter()
+            withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = withFrac.date(from: str) { return d }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            if let d = plain.date(from: str) { return d }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date: \(str)")
+        }
+        return dec
+    }
+
+    private static func makeFractionalISO8601Encoder() -> JSONEncoder {
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .custom { date, encoder in
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var container = encoder.singleValueContainer()
+            try container.encode(fmt.string(from: date))
+        }
+        return enc
+    }
+
     private func buildSyncDTOs(for ids: Set<String>, encoder: JSONEncoder) -> [SyncDocumentDTO] {
         let sealedDocs = sealedDocumentsForPersistence().filter { ids.contains($0.id) }
         return sealedDocs.map { doc in
@@ -1777,7 +1898,8 @@ public final class WorkspaceStore {
     }
 
     /// Coalesced delta sync: pushes only dirty docs, pulls only changes since last watermark,
-    /// preserves `(Sync Conflict)` copies instead of clobbering unpushed edits, and backs off on errors.
+    /// aligns local updatedAt with server timestamps (preventing clock-skew merge drops),
+    /// preserves `(Sync Conflict)` copies instead of clobbering unpushed edits, and syncs focus state.
     public func syncWithBackend(forceFullPull: Bool = false) async {
         guard authSession != nil, !isSyncing else { return }
         isSyncing = true
@@ -1786,8 +1908,7 @@ public final class WorkspaceStore {
         defer { isSyncing = false }
 
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
+            let encoder = Self.makeFractionalISO8601Encoder()
             var pendingIds = (lastSyncServerTimeMs == 0) ? Set(documents.map(\.id)) : dirtyDocumentIds
             let sinceWatermark: Int64 = forceFullPull ? 0 : lastSyncServerTimeMs
 
@@ -1801,6 +1922,7 @@ public final class WorkspaceStore {
             if !pulled.documents.isEmpty {
                 syncPulseDirection = .received
                 syncPulseId = UUID()
+                rebuildSearchIndex()
             }
 
             // Step 2: Build push payload AFTER applying remote tombstones so deleted docs are never resurrected
@@ -1808,6 +1930,13 @@ public final class WorkspaceStore {
             if !dtos.isEmpty {
                 let pushed = try await withAuthorizedSession { sess in
                     try await self.backendClient.syncPush(serverURL: sess.serverURL, accessToken: sess.accessToken, documents: dtos)
+                }
+                // Align local updatedAt with authoritative server timestamps to eliminate client clock skew.
+                for serverDoc in pushed.documents {
+                    if let serverUpdated = serverDoc.updatedAt,
+                       let idx = documents.firstIndex(where: { $0.id == serverDoc.id }) {
+                        documents[idx].updatedAt = serverUpdated
+                    }
                 }
                 lastSyncServerTimeMs = max(pulled.serverTime, pushed.serverTime)
                 syncPulseDirection = .sent
@@ -1821,6 +1950,8 @@ public final class WorkspaceStore {
             }) {
                 self.vaultEnvelope = remoteVault
             }
+
+            await syncFocusStateWithBackend()
 
             dirtyDocumentIds.subtract(pendingIds)
             dirtyDocumentIds.subtract(deletedRemoteIds)
@@ -1843,8 +1974,7 @@ public final class WorkspaceStore {
     }
 
     private func mergeRemoteDocuments(_ remoteDocs: [SyncDocumentDTO], localDirtyIds: Set<String>) {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let decoder = Self.makeFractionalISO8601Decoder()
         for r in remoteDocs {
             // Respect server tombstones so permanently deleted docs never resurrect across devices.
             if r.deletedAt != nil {
@@ -1858,7 +1988,8 @@ public final class WorkspaceStore {
             if let idx = documents.firstIndex(where: { $0.id == r.id }) {
                 let remoteUpdated = r.updatedAt ?? Date.distantPast
                 let localDoc = documents[idx]
-                let bothEdited = localDirtyIds.contains(r.id) && remoteUpdated > localDoc.updatedAt
+                let isLocalDirty = localDirtyIds.contains(r.id)
+                let bothEdited = isLocalDirty && remoteUpdated > localDoc.updatedAt
                 if bothEdited {
                     var conflictBlocks: [Block] = []
                     if !r.isLocked, let raw = r.payloadJson?.data(using: .utf8),
@@ -1878,8 +2009,9 @@ public final class WorkspaceStore {
                         updatedAt: remoteUpdated
                     )
                     documents.insert(conflictDoc, at: 0)
-                } else if remoteUpdated > localDoc.updatedAt {
+                } else if !isLocalDirty || remoteUpdated > localDoc.updatedAt {
                     documents[idx].title = r.title
+                    documents[idx].folderId = (r.folderId?.isEmpty == false) ? r.folderId : nil
                     documents[idx].isLocked = r.isLocked
                     documents[idx].isStarred = r.isStarred
                     documents[idx].isTrashed = r.isTrashed
@@ -2144,9 +2276,11 @@ public final class WorkspaceStore {
         unlockedVaultKey = nil
     }
 
-    /// Guarantees locked documents NEVER write plaintext blocks to disk or sync payloads, even while unlocked in RAM.
+    /// Guarantees locked documents NEVER write plaintext blocks to disk or sync payloads, even while unlocked in RAM,
+    /// and ensures completely blank untitled notes are never persisted or synced.
     private func sealedDocumentsForPersistence() -> [RoweDocument] {
-        documents.map { doc in
+        documents.compactMap { doc in
+            if isDocumentEmpty(doc) { return nil }
             guard doc.isLocked else { return doc }
             var copy = doc
             if unlockedDocumentIds.contains(doc.id), let key = unlockedVaultKey,
@@ -2155,6 +2289,207 @@ public final class WorkspaceStore {
             }
             copy.blocks = []
             return copy
+        }
+    }
+
+    // MARK: - Adaptive Focus & Behavioral Nudge Engine (Zero Blocking)
+
+    /// Returns ONLY unlocked, non-trashed pending tasks — enforcing the Zero-Knowledge firewall.
+    public func unlockedNudgeCandidateTasks() -> [NudgeCandidateTask] {
+        var candidates: [NudgeCandidateTask] = []
+        for doc in documents where !doc.isLocked && doc.encryptedPayload == nil && !doc.isTrashed {
+            func collect(_ blocks: [Block]) {
+                for b in blocks {
+                    if b.isTask {
+                        let item = ResolvedTaskItem(
+                            block: b,
+                            documentId: doc.id,
+                            documentTitle: doc.displayTitle,
+                            isInbox: b.task?.isInbox ?? (doc.title == "Tasks Inbox")
+                        )
+                        if let candidate = NudgeCandidateTask(from: item, in: doc) {
+                            candidates.append(candidate)
+                        }
+                    }
+                    collect(b.subblocks)
+                }
+            }
+            collect(doc.blocks)
+        }
+        return candidates
+    }
+
+    public func recordFocusInterval(_ interval: UsageInterval) {
+        guard interval.durationSeconds >= 5 else { return }
+        focusBehavior.intervals.append(interval)
+        let cutoff = Date().addingTimeInterval(-45 * 86400)
+        focusBehavior.intervals = focusBehavior.intervals.filter { $0.endUTC >= cutoff }
+        focusBehavior.updatedAt = Date()
+        schedulePersistence()
+        scheduleDebouncedFocusSync()
+    }
+
+    @discardableResult
+    public func evaluateFocusNudge(
+        for canonicalTarget: String,
+        at now: Date = Date(),
+        bypassColdStartForPreview: Bool = false
+    ) -> FocusSuggestion? {
+        let candidates = unlockedNudgeCandidateTasks()
+        let suggestion = focusEngine.evaluateNudge(
+            target: canonicalTarget,
+            candidates: candidates,
+            state: focusBehavior,
+            now: now,
+            bypassColdStartForPreview: bypassColdStartForPreview
+        )
+        if let suggestion {
+            activeFocusSuggestion = suggestion
+        }
+        return suggestion
+    }
+
+    public func recordFocusOutcome(_ outcome: NudgeOutcome, for suggestion: FocusSuggestion, at now: Date = Date()) {
+        focusEngine.recordOutcome(outcome, for: suggestion, deviceId: deviceId, into: &focusBehavior, now: now)
+        if activeFocusSuggestion?.id == suggestion.id {
+            activeFocusSuggestion = nil
+        }
+        schedulePersistence()
+        scheduleDebouncedFocusSync(delaySeconds: 1.0)
+    }
+
+    public func unmuteFocusSlot(storageKey: String) {
+        guard var rec = focusBehavior.receptivityBySlot[storageKey] else { return }
+        rec.alpha = 2.0
+        rec.beta = 2.0
+        rec.lastSilencedUTC = nil
+        rec.lastUpdatedUTC = Date()
+        focusBehavior.receptivityBySlot[storageKey] = rec
+        focusBehavior.updatedAt = Date()
+        schedulePersistence()
+        scheduleDebouncedFocusSync(delaySeconds: 1.0)
+    }
+
+    public func toggleFocusEnabled(_ enabled: Bool) {
+        focusBehavior.isEnabled = enabled
+        focusBehavior.updatedAt = Date()
+        if !enabled { activeFocusSuggestion = nil }
+        schedulePersistence()
+        scheduleDebouncedFocusSync(delaySeconds: 1.0)
+    }
+
+    public func addFocusAllowlistedDomain(_ raw: String) {
+        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "www.", with: "")
+            .split(separator: "/").first.map(String.init) ?? ""
+        guard !clean.isEmpty, !focusBehavior.allowlistedDomains.contains(clean) else { return }
+        focusBehavior.allowlistedDomains.append(clean)
+        focusBehavior.allowlistedDomains.sort()
+        focusBehavior.updatedAt = Date()
+        schedulePersistence()
+        scheduleDebouncedFocusSync(delaySeconds: 1.5)
+    }
+
+    public func removeFocusAllowlistedDomain(_ domain: String) {
+        focusBehavior.allowlistedDomains.removeAll { $0 == domain }
+        focusBehavior.updatedAt = Date()
+        schedulePersistence()
+        scheduleDebouncedFocusSync(delaySeconds: 1.5)
+    }
+
+    public func addCustomDistractionTarget(_ raw: String) {
+        let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !clean.isEmpty, !focusBehavior.customDistractionTargets.contains(clean) else { return }
+        focusBehavior.customDistractionTargets.append(clean)
+        focusBehavior.customDistractionTargets.sort()
+        focusBehavior.updatedAt = Date()
+        schedulePersistence()
+        scheduleDebouncedFocusSync(delaySeconds: 1.5)
+    }
+
+    public func removeCustomDistractionTarget(_ target: String) {
+        focusBehavior.customDistractionTargets.removeAll { $0 == target }
+        focusBehavior.updatedAt = Date()
+        schedulePersistence()
+        scheduleDebouncedFocusSync(delaySeconds: 1.5)
+    }
+
+    public func circadianFocusMinutes(daysBack: Int = 7) -> [Double] {
+        focusEngine.circadianMinutesBySlot(in: focusBehavior, daysBack: daysBack)
+    }
+
+    public func mergedFocusSessions(for target: String) -> [UsageInterval] {
+        focusEngine.mergedSessions(for: target, from: focusBehavior.intervals)
+    }
+
+    /// Generates a realistic live preview suggestion using an actual unlocked pending task (or a calm fallback).
+    public func makePreviewFocusSuggestion() -> FocusSuggestion {
+        let candidates = unlockedNudgeCandidateTasks()
+        if let real = focusEngine.evaluateNudge(
+            target: "canon:instagram",
+            candidates: candidates,
+            state: focusBehavior,
+            now: Date(),
+            bypassColdStartForPreview: true
+        ) {
+            return real
+        }
+        let sampleTask = NudgeCandidateTask(
+            id: "preview-sample",
+            documentId: documents.first?.id ?? "inbox",
+            title: "Reply to project review notes",
+            scheduleDate: Date()
+        )
+        let slotKey = FocusSlotKey.from(date: Date(), tzOffsetMinutes: TimeZone.current.secondsFromGMT() / 60, target: "canon:instagram")
+        return FocusSuggestion(
+            canonicalTarget: "canon:instagram",
+            displayAppName: "Instagram",
+            iconName: "camera.aperture",
+            headline: "Usually afternoons on Instagram run ~1h 30m",
+            detailLine: "Knock out \"Reply to project review notes\" (~10m) first, then scroll freely?",
+            task: sampleTask,
+            estimatedMinutes: 10,
+            predictedScrollMinutes: 90,
+            slotKey: slotKey,
+            isPersonalized: true
+        )
+    }
+
+    private func estimateAndCacheDuration(for candidate: NudgeCandidateTask) async {
+        let mins = await focusEstimator.estimateMinutes(for: candidate)
+        var stat = focusBehavior.taskStats[candidate.id] ?? TaskNudgeStats(taskId: candidate.id, estimatedMinutes: mins, lastEditedAt: candidate.updatedAt)
+        stat.estimatedMinutes = mins
+        focusBehavior.taskStats[candidate.id] = stat
+        schedulePersistence()
+    }
+
+    private func scheduleDebouncedFocusSync(delaySeconds: Double = 5.0) {
+        guard isSignedIn else { return }
+        focusSyncDebounceTask?.cancel()
+        focusSyncDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            await self.syncFocusStateWithBackend()
+        }
+    }
+
+    public func syncFocusStateWithBackend() async {
+        guard isSignedIn else { return }
+        do {
+            if let remote = try await withAuthorizedSession({ sess in
+                try await self.backendClient.getFocusState(serverURL: sess.serverURL, accessToken: sess.accessToken)
+            }) {
+                self.focusBehavior.merge(with: remote)
+            }
+            _ = try await withAuthorizedSession { sess in
+                try await self.backendClient.putFocusState(serverURL: sess.serverURL, accessToken: sess.accessToken, state: self.focusBehavior)
+            }
+            await database.scheduleSave(makeSnapshot())
+        } catch {
+            // Focus sync is best-effort; never interrupt document editing or block apps.
         }
     }
 
@@ -2172,7 +2507,8 @@ public final class WorkspaceStore {
             authSession: authSession,
             serverURL: serverURL,
             lastSyncServerTimeMs: lastSyncServerTimeMs,
-            dirtyDocumentIds: Array(dirtyDocumentIds)
+            dirtyDocumentIds: Array(dirtyDocumentIds),
+            focusBehavior: focusBehavior
         )
     }
 

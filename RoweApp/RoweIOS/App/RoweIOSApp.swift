@@ -9,9 +9,13 @@ struct RoweIOSApp: App {
     var body: some Scene {
         WindowGroup {
             IOSRootShellView(store: store)
-                .onChange(of: scenePhase) { phase in
+                .onAppear {
+                    IOSFocusManager.shared.configure(with: store)
+                }
+                .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         store.handleAppBecameActive()
+                        IOSFocusManager.shared.importSharedDeviceActivityEvents()
                     }
                 }
         }

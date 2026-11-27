@@ -46,7 +46,8 @@ struct IOSRootShellView: View {
     @State private var tasksPath: [IOSRoute] = []
     @State private var calendarPath: [IOSRoute] = []
     @State private var showQuickAddSheet = false
-    @State private var showOnboarding = false
+    @State private var quickAddDefaultDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding")
 
     private var preferredScheme: ColorScheme? {
         switch store.settings.appearanceMode {
@@ -95,7 +96,8 @@ struct IOSRootShellView: View {
                 calendarPath: $calendarPath,
                 hidesTabBar: shouldHideBottomControls,
                 resolvedAccent: resolvedAccent,
-                onOpenQuickAdd: {
+                onOpenQuickAdd: { targetDate in
+                    quickAddDefaultDate = Calendar.current.startOfDay(for: targetDate ?? Date())
                     withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                         showQuickAddSheet = true
                     }
@@ -104,11 +106,12 @@ struct IOSRootShellView: View {
             )
             .ignoresSafeArea()
 
-            // Floating Liquid Glass '+' button aligned dead-level with the iOS 26 tab bar pill
+            // Floating Liquid Glass '+' button aligned to the bottom alongside the iOS 26 tab bar pill
             if !shouldHideBottomControls {
                 IOSGlassCircleButton(systemImage: "plus", size: 56, iconSize: 22) {
                     IOSKeyboard.dismiss()
                     if selectedTab == .calendar || selectedTab == .tasks {
+                        quickAddDefaultDate = Calendar.current.startOfDay(for: Date())
                         withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                             showQuickAddSheet = true
                         }
@@ -118,7 +121,7 @@ struct IOSRootShellView: View {
                     }
                 }
                 .padding(.trailing, 18)
-                .padding(.bottom, 22)
+                .padding(.bottom, 12)
                 .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -134,7 +137,7 @@ struct IOSRootShellView: View {
                         }
                     }
 
-                IOSQuickAddTaskCard(store: store) {
+                IOSQuickAddTaskCard(store: store, initialDate: quickAddDefaultDate) {
                     IOSKeyboard.dismiss()
                     withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                         showQuickAddSheet = false
@@ -177,12 +180,20 @@ struct IOSRootShellView: View {
         .tint(resolvedAccent)
         .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: shouldHideBottomControls)
         .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: showQuickAddSheet)
-        .fullScreenCover(isPresented: $showOnboarding) {
-            RoweOnboardingView(
-                store: store,
-                onSignInRequested: { store.isLoginSheetPresented = true },
-                onFinish: { showOnboarding = false }
-            )
+        .overlay {
+            if showOnboarding {
+                RoweOnboardingView(
+                    store: store,
+                    onSignInRequested: { store.isLoginSheetPresented = true },
+                    onFinish: {
+                        withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                            showOnboarding = false
+                        }
+                    }
+                )
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
         }
         .sheet(isPresented: $store.isLoginSheetPresented) {
             IOSLoginSheet(store: store)
@@ -261,7 +272,7 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
     @Binding var calendarPath: [IOSRoute]
     let hidesTabBar: Bool
     let resolvedAccent: Color
-    let onOpenQuickAdd: () -> Void
+    let onOpenQuickAdd: (Date?) -> Void
     let onReplayOnboarding: () -> Void
 
     @Namespace private var homeZoomNS
@@ -381,6 +392,9 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
             Group {
                 if let doc = store.documents.first(where: { $0.id == docId }) {
                     IOSDocumentEditorView(store: store, document: doc)
+                        .onDisappear {
+                            store.pruneEmptyDocumentIfNeeded(docId: docId)
+                        }
                 } else {
                     ContentUnavailableView("Document Not Found", systemImage: "doc.questionmark")
                 }
@@ -390,7 +404,7 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
             IOSSettingsView(store: store, onReplayOnboarding: onReplayOnboarding)
                 .navigationTransition(.zoom(sourceID: "settings-avatar", in: zoomNS))
         case .connections:
-            IOSConnectionsPlaceholderView(store: store)
+            IOSConnectionsView(store: store)
                 .navigationTransition(.zoom(sourceID: "row-connections", in: zoomNS))
         case .sharedWithMe:
             IOSSharedPlaceholderView(store: store)
@@ -413,20 +427,7 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
     }
 }
 
-private struct IOSConnectionsPlaceholderView: View {
-    @Bindable var store: WorkspaceStore
-    var body: some View {
-        List {
-            ForEach(store.connections) { conn in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(conn.name).font(.headline)
-                    Text(conn.endpointURL).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .navigationTitle("Connections")
-    }
-}
+
 
 private struct IOSSharedPlaceholderView: View {
     @Bindable var store: WorkspaceStore
@@ -515,56 +516,6 @@ private struct IOSQuickOpenView: View {
                         if let first = items.first { activate(first) }
                     }
 
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Button {
-                    dismissSearch()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Color.primary.opacity(0.10)))
-                }
-                .buttonStyle(RowePressScaleStyle())
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            HStack(spacing: 8) {
-                Label("Context: \(contextDisplayName)", systemImage: "scope")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    let reached = store.contextualSearchResponse.reachedDepth
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-                    Text(reached.label)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(reached == .currentView ? resolvedAccent : .secondary)
-
-                    if store.contextualSearchResponse.servedFromCache {
-                        Text("Cached")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1.5)
-                            .background(Capsule().fill(Color.primary.opacity(0.08)))
-                    }
-                }
-
-                Spacer()
-
                 Menu {
                     Section("Maximum Search Depth") {
                         ForEach(SearchMaxDepth.allCases, id: \.self) { depth in
@@ -590,20 +541,30 @@ private struct IOSQuickOpenView: View {
                         store.rebuildSearchIndex()
                     }
                 } label: {
-                    HStack(spacing: 4) {
-                        Text("Max: \(store.settings.searchMaxDepth.label)")
-                            .font(.system(size: 11, weight: .medium))
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(resolvedAccent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(resolvedAccent.opacity(0.14)))
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.primary.opacity(0.08)))
                 }
+
+                Button {
+                    if !query.isEmpty {
+                        query = ""
+                    } else {
+                        dismissSearch()
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.primary.opacity(0.10)))
+                }
+                .buttonStyle(RowePressScaleStyle())
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 10)
+            .padding(.vertical, 10)
 
             Divider().opacity(0.25)
 
@@ -617,6 +578,37 @@ private struct IOSQuickOpenView: View {
             }
             .frame(maxHeight: 380)
             .scrollDismissesKeyboard(.interactively)
+
+            Divider().opacity(0.2)
+
+            HStack(spacing: 8) {
+                Label("Context: \(contextDisplayName)", systemImage: "scope")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                let activeLabel = query.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? store.settings.searchMaxDepth.label
+                    : store.contextualSearchResponse.reachedDepth.label
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(activeLabel)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty && store.contextualSearchResponse.servedFromCache {
+                    Text("Cached")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
         .roweIOSGlassRoundedRect(radius: 26, interactive: true)
         .iosDragToDismiss { dismissSearch() }

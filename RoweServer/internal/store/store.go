@@ -42,4 +42,8 @@ type Store interface {
 	ListDocumentsSince(ctx context.Context, userID string, since time.Time) ([]model.SyncDocument, error)
 	GetDocument(ctx context.Context, userID, docID string) (*model.SyncDocument, error)
 	DeleteDocument(ctx context.Context, userID, docID string) error
+
+	// Adaptive Focus Behavioral State
+	GetFocusState(ctx context.Context, userID string) (string, int64, error)
+	UpsertFocusState(ctx context.Context, userID, stateJSON string, updatedAt int64) (int64, error)
 }

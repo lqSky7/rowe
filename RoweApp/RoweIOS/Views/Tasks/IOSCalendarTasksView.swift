@@ -17,7 +17,7 @@ struct IOSCalendarTasksView: View {
     let mode: IOSTaskViewMode
     let zoomNamespace: Namespace.ID
     var onOpenSettings: () -> Void
-    var onOpenQuickAdd: () -> Void
+    var onOpenQuickAdd: (Date?) -> Void
 
     @Namespace private var taskSheetNS
     @State private var showCompleted: Bool = false
@@ -50,7 +50,7 @@ struct IOSCalendarTasksView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 // Top bar
                 HStack {
                     Button {
@@ -74,7 +74,7 @@ struct IOSCalendarTasksView: View {
                         Menu {
                             Toggle("Show Completed", isOn: $showCompleted)
                             Toggle("Show Previous Days", isOn: $showPreviousDays)
-                            Button("Add Task", systemImage: "plus") { onOpenQuickAdd() }
+                            Button("Add Task", systemImage: "plus") { onOpenQuickAdd(nil) }
                         } label: {
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 16, weight: .semibold))
@@ -125,9 +125,11 @@ struct IOSCalendarTasksView: View {
                     .transaction { $0.animation = nil }
                     .padding(.horizontal, 18)
 
-                    ForEach(visibleDays, id: \.self) { day in
-                        daySection(for: day)
-                            .transition(.opacity)
+                    VStack(alignment: .leading, spacing: 34) {
+                        ForEach(visibleDays, id: \.self) { day in
+                            daySection(for: day)
+                                .transition(.opacity)
+                        }
                     }
                 } else {
                     allTasksBody
@@ -209,7 +211,7 @@ struct IOSCalendarTasksView: View {
                 Spacer()
                 Button {
                     IOSHaptics.shared.tap()
-                    onOpenQuickAdd()
+                    onOpenQuickAdd(day)
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .semibold))
@@ -682,11 +684,17 @@ struct IOSQuickAddTaskCard: View {
     var onClose: () -> Void
 
     @State private var text: String = ""
-    @State private var scheduleDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var scheduleDate: Date
     @State private var undoStack: [String] = []
     @State private var redoStack: [String] = []
     @State private var isApplyingHistory = false
     @FocusState private var isFocused: Bool
+
+    init(store: WorkspaceStore, initialDate: Date = Calendar.current.startOfDay(for: Date()), onClose: @escaping () -> Void) {
+        self.store = store
+        self._scheduleDate = State(initialValue: Calendar.current.startOfDay(for: initialDate))
+        self.onClose = onClose
+    }
 
     private var resolvedAccent: Color {
         let isDark: Bool = switch store.settings.appearanceMode {
@@ -743,7 +751,7 @@ struct IOSQuickAddTaskCard: View {
                 .buttonStyle(RowePressScaleStyle())
             }
 
-            TextField("Add to Daily Note or Task", text: $text, axis: .vertical)
+            TextField("New task…", text: $text, axis: .vertical)
                 .focused($isFocused)
                 .font(.system(size: 17))
                 .lineLimit(1...4)

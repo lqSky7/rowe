@@ -14,7 +14,7 @@ struct CraftWindowShell: View {
     @State private var dragStartSidebarWidth: Double?
     @State private var globalKeyMonitor: Any?
     @State private var sidebarPage: Int = 1
-    @State private var showOnboarding: Bool = false
+    @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding")
 
     private var isDarkAppearance: Bool {
         switch store.settings.appearanceMode {
@@ -221,6 +221,7 @@ struct CraftWindowShell: View {
                 showOnboarding = true
             }
             installGlobalShortcutMonitor()
+            MacFocusTracker.shared.start(with: store)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.handleAppBecameActive()

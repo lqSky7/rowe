@@ -108,20 +108,41 @@ public enum BackendError: Error, LocalizedError, Sendable {
     }
 }
 
-/// Async HTTP client for RoweServer (Auth, Zero-Knowledge Vault Envelope, and Delta Sync).
+/// Async HTTP client for RoweServer (Auth, Zero-Knowledge Vault Envelope, Delta Sync, SSE Hooks, and Focus State).
 public actor RoweBackendClient {
     private let session: URLSession
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
+    private static func parseISO8601Date(_ raw: String) -> Date? {
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFrac.date(from: raw) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: raw)
+    }
+
     public init(session: URLSession = .shared) {
         self.session = session
         let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
+        enc.dateEncodingStrategy = .custom { date, encoder in
+            let fmt = ISO8601DateFormatter()
+            fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var container = encoder.singleValueContainer()
+            try container.encode(fmt.string(from: date))
+        }
         self.encoder = enc
 
         let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .iso8601
+        dec.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let str = try container.decode(String.self)
+            if let date = RoweBackendClient.parseISO8601Date(str) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO8601 date: \(str)")
+        }
         self.decoder = dec
     }
 
@@ -287,6 +308,44 @@ public actor RoweBackendClient {
             bearer: accessToken,
             body: Optional<String>.none
         )
+    }
+
+    // MARK: - Focus Behavior Sync
+
+    public struct FocusStateEnvelope: Codable, Sendable {
+        public let stateJson: String?
+        public let updatedAt: Int64
+    }
+
+    public func getFocusState(serverURL: String, accessToken: String) async throws -> FocusBehaviorState? {
+        let env: FocusStateEnvelope = try await request(
+            serverURL: serverURL,
+            path: "/api/v1/focus/state",
+            method: "GET",
+            bearer: accessToken,
+            body: Optional<String>.none
+        )
+        guard let raw = env.stateJson, !raw.isEmpty, let data = raw.data(using: .utf8) else {
+            return nil
+        }
+        return try? decoder.decode(FocusBehaviorState.self, from: data)
+    }
+
+    public func putFocusState(serverURL: String, accessToken: String, state: FocusBehaviorState) async throws -> Int64 {
+        struct Body: Encodable {
+            let stateJson: String
+            let updatedAt: Int64
+        }
+        let encoded = try encoder.encode(state)
+        let jsonStr = String(data: encoded, encoding: .utf8) ?? "{}"
+        let env: FocusStateEnvelope = try await request(
+            serverURL: serverURL,
+            path: "/api/v1/focus/state",
+            method: "PUT",
+            bearer: accessToken,
+            body: Body(stateJson: jsonStr, updatedAt: Int64(state.updatedAt.timeIntervalSince1970 * 1000))
+        )
+        return env.updatedAt
     }
 
     /// Opens a long-lived Server-Sent Events (SSE) stream to receive instant cross-device sync hooks.

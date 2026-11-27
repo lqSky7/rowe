@@ -18,8 +18,20 @@ public enum ConnectionAccessMode: String, Codable, CaseIterable, Sendable {
 
 public enum ConnectionDocumentScope: String, Codable, CaseIterable, Sendable {
     case allDocuments = "All Documents"
-    case dailyNotesAndTasks = "All Daily Notes and Tasks"
+    case dailyNotesAndTasks = "Tasks Only"
     case selectedFolders = "Selected Folders"
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        if rawValue == "All Daily Notes and Tasks" {
+            self = .dailyNotesAndTasks
+        } else if let scope = Self(rawValue: rawValue) {
+            self = scope
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown connection document scope: \(rawValue)")
+        }
+    }
 }
 
 public struct ConnectionItem: Identifiable, Codable, Hashable, Sendable {

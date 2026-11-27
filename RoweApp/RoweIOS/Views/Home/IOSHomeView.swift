@@ -12,7 +12,6 @@ struct IOSHomeView: View {
     var onOpenShared: () -> Void
 
     @State private var searchText: String = ""
-    @State private var searchMode: String = "Keyword"
     @State private var showStarredOnly: Bool = false
     @FocusState private var isSearchFocused: Bool
 
@@ -20,7 +19,7 @@ struct IOSHomeView: View {
         let base = store.documents.filter { !$0.isTrashed }
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = q.isEmpty ? base : base.filter {
-            $0.displayTitle.lowercased().contains(q) || $0.previewSnippet.lowercased().contains(q)
+            $0.displayTitle.lowercased().contains(q)
         }
         return filtered.sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -57,10 +56,6 @@ struct IOSHomeView: View {
                             Button("New Document", systemImage: "doc.badge.plus") {
                                 let d = store.createDocument(openImmediately: false)
                                 onOpenDoc(d.id)
-                            }
-                            Button("Daily Note", systemImage: "calendar.badge.plus") {
-                                store.openOrCreateDailyNote()
-                                if let active = store.activeDocument { onOpenDoc(active.id) }
                             }
                             if store.hasVaultPin && !store.unlockedDocumentIds.isEmpty {
                                 Button("Lock All Open Notes", systemImage: "lock.fill") {
@@ -110,7 +105,7 @@ struct IOSHomeView: View {
                     .font(.system(size: 32, weight: .bold))
                     .padding(.horizontal, 18)
 
-                // Search Bar with Keyword Filter Chip
+                // Title Search Bar
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15, weight: .medium))
@@ -129,20 +124,6 @@ struct IOSHomeView: View {
                                 .font(.system(size: 15))
                                 .foregroundStyle(.secondary)
                         }
-                    }
-
-                    Menu {
-                        Button("Keyword") { searchMode = "Keyword" }
-                        Button("Title Only") { searchMode = "Title" }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(searchMode)
-                                .font(.system(size: 13.5, weight: .medium))
-                                .contentTransition(.numericText())
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -405,7 +386,6 @@ struct IOSHomeRecentCard: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75)
             )
-            .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
         }
         .buttonStyle(RowePressScaleStyle())
     }

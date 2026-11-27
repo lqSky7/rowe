@@ -57,6 +57,11 @@ struct IOSSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     Divider().opacity(0.2).padding(.leading, 42)
+                    NavigationLink { IOSFocusPatternsView(store: store) } label: {
+                        settingsRow("Focus Patterns", icon: "waveform.and.magnifyingglass")
+                    }
+                    .buttonStyle(.plain)
+                    Divider().opacity(0.2).padding(.leading, 42)
                     Button {
                         IOSHaptics.shared.tap()
                         if store.hasVaultPin {

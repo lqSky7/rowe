@@ -178,3 +178,54 @@ func (h *SyncHandler) Events(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// GetFocusState returns the user's cross-device Adaptive Focus behavioral state JSON.
+func (h *SyncHandler) GetFocusState(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	stateJSON, updatedAt, err := h.store.GetFocusState(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"stateJson": "",
+				"updatedAt": int64(0),
+			})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "could not load focus state")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stateJson": stateJSON,
+		"updatedAt": updatedAt,
+	})
+}
+
+type putFocusStateRequest struct {
+	StateJSON string `json:"stateJson"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// PutFocusState upserts the user's cross-device Adaptive Focus behavioral state JSON
+// and notifies other connected devices over SSE so cooldowns and leases sync immediately.
+func (h *SyncHandler) PutFocusState(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	var req putFocusStateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	savedAt, err := h.store.UpsertFocusState(r.Context(), userID, req.StateJSON, req.UpdatedAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save focus state")
+		return
+	}
+	if h.hub != nil {
+		h.hub.Publish(userID, SyncEvent{
+			Type:       "focus.updated",
+			ServerTime: savedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stateJson": req.StateJSON,
+		"updatedAt": savedAt,
+	})
+}

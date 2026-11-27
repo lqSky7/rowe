@@ -15,6 +15,7 @@ targets:
     sources:
       - path: App
       - path: DesignSystem
+      - path: Services
       - path: Views
       - path: ../RoweShared
       - path: Resources/Shaders/GlassGlow.metal

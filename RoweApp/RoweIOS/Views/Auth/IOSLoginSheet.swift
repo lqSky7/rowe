@@ -7,10 +7,15 @@ struct IOSLoginSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
 
+    private enum LoginField: Hashable {
+        case displayName, email, password
+    }
+
     @State private var isRegisterMode = false
     @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var password: String = ""
+    @FocusState private var focusedField: LoginField?
     @Namespace private var modePillNS
 
     private var canSubmit: Bool {
@@ -77,6 +82,9 @@ struct IOSLoginSheet: View {
                         if isRegisterMode {
                             fieldRow(icon: "person") {
                                 TextField("Your name", text: $displayName)
+                                    .focused($focusedField, equals: .displayName)
+                                    .submitLabel(.next)
+                                    .onSubmit { focusedField = .email }
                             }
                         }
 
@@ -85,10 +93,16 @@ struct IOSLoginSheet: View {
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.emailAddress)
                                 .autocorrectionDisabled()
+                                .focused($focusedField, equals: .email)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .password }
                         }
 
                         fieldRow(icon: "lock") {
                             SecureField(isRegisterMode ? "Create password (8+ chars)" : "Password", text: $password)
+                                .focused($focusedField, equals: .password)
+                                .submitLabel(.go)
+                                .onSubmit { submit() }
                         }
                     }
 

@@ -44,9 +44,6 @@ struct IOSAllDocsView: View {
 
     private var filteredDocs: [RoweDocument] {
         var list = store.documents.filter { $0.isTrashed == isTrashMode }
-        if !store.settings.showDailyNotesInAllDocs {
-            list = list.filter { !$0.isDailyNote }
-        }
         if let folderId {
             list = list.filter { $0.folderId == folderId }
         }
@@ -130,14 +127,7 @@ struct IOSAllDocsView: View {
                             Label("Display Style · \(displayStyle.rawValue)", systemImage: "square.grid.2x2")
                         }
 
-                        Divider()
 
-                        Toggle(isOn: Binding(
-                            get: { store.settings.showDailyNotesInAllDocs },
-                            set: { val in store.updateSettings { $0.showDailyNotesInAllDocs = val } }
-                        )) {
-                            Label("Show Daily Notes", systemImage: "calendar")
-                        }
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 16, weight: .semibold))

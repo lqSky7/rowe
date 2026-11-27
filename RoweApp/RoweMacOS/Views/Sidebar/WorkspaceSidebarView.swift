@@ -237,17 +237,48 @@ struct WorkspaceSidebarView: View {
     }
 
     private var spaceHeader: some View {
-        HStack(spacing: 8) {
-            SpaceAvatarView(space: store.space, size: 24, cornerRadius: 7)
+        HStack(spacing: 9) {
+            ZStack {
+                sidebarAvatarGraphic
+                    .frame(width: 26, height: 26)
+                    .clipShape(Circle())
+                    .saturation(1.45)
+                    .blur(radius: 7)
+                    .scaleEffect(glowScale)
+                    .opacity(glowOpacity)
+                    .allowsHitTesting(false)
+
+                sidebarAvatarGraphic
+                    .frame(width: 24, height: 24)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
+                    )
+            }
+            .frame(width: 26, height: 26)
+
             Text(store.space.name)
                 .font(.system(size: 13.5, weight: .semibold))
                 .lineLimit(1)
             Spacer()
         }
         .contentShape(Rectangle())
+        .help(store.isSignedIn ? "Signed in (\(store.authSession?.user.email ?? ""))" : "Sign In / Space Settings")
         .onTapGesture {
             HapticsManager.shared.tap()
-            store.navigate(to: .settings)
+            withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                if store.isSignedIn {
+                    store.selectedSettingsSectionId = SettingsCategory.account.rawValue
+                    store.navigate(to: .settings)
+                } else {
+                    store.isLoginSheetPresented = true
+                }
+            }
+        }
+        .onChange(of: store.syncPulseId) { _, _ in
+            guard let dir = store.syncPulseDirection else { return }
+            triggerAvatarSyncGlow(direction: dir)
         }
     }
 
@@ -379,46 +410,6 @@ struct WorkspaceSidebarView: View {
             }
             .buttonStyle(.plain)
             .help("Settings (⌘,)")
-
-            Button {
-                HapticsManager.shared.tap()
-                withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                    if store.isSignedIn {
-                        store.selectedSettingsSectionId = SettingsCategory.account.rawValue
-                        store.navigate(to: .settings)
-                    } else {
-                        store.isLoginSheetPresented = true
-                    }
-                }
-            } label: {
-                ZStack {
-                    // Blurred profile-picture aura: in -> out when sent, out -> in when received
-                    sidebarAvatarGraphic
-                        .frame(width: 24, height: 24)
-                        .clipShape(Circle())
-                        .saturation(1.45)
-                        .blur(radius: 7)
-                        .scaleEffect(glowScale)
-                        .opacity(glowOpacity)
-                        .allowsHitTesting(false)
-
-                    sidebarAvatarGraphic
-                        .frame(width: 22, height: 22)
-                        .clipShape(RoundedRectangle(cornerRadius: 6.5, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-                                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
-                        )
-                }
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(store.isSignedIn ? "Signed in (\(store.authSession?.user.email ?? ""))" : "Sign In / Sync Account")
-            .onChange(of: store.syncPulseId) { _, _ in
-                guard let dir = store.syncPulseDirection else { return }
-                triggerAvatarSyncGlow(direction: dir)
-            }
 
             Spacer()
 

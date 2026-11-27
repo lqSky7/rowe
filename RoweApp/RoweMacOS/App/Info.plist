@@ -22,6 +22,8 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Rowe reads only the active browser URL locally to recognize distraction sessions. Full URLs are never stored or synced.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Rowe Personal Workspace</string>
 </dict>

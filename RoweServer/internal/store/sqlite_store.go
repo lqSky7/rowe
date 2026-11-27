@@ -78,6 +78,11 @@ func (s *SQLiteStore) migrate() error {
 			PRIMARY KEY (user_id, id)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_docs_user_updated ON documents(user_id, updated_at);`,
+		`CREATE TABLE IF NOT EXISTS focus_states (
+			user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			state_json TEXT NOT NULL DEFAULT '',
+			updated_at INTEGER NOT NULL
+		);`,
 	}
 	for _, stmt := range stmts {
 		if err := s.db.exec(stmt); err != nil {
@@ -394,6 +399,50 @@ func scanDocument(cols []any) model.SyncDocument {
 		doc.DeletedAt = &t
 	}
 	return doc
+}
+
+// MARK: - Adaptive Focus Behavioral State
+
+func (s *SQLiteStore) GetFocusState(_ context.Context, userID string) (string, int64, error) {
+	var stateJSON string
+	var updatedAt int64
+	var found bool
+	err := s.db.queryRows(
+		`SELECT state_json, updated_at FROM focus_states WHERE user_id = ? LIMIT 1`,
+		[]any{userID},
+		func(cols []any) error {
+			stateJSON = asString(cols[0])
+			updatedAt = asInt64(cols[1])
+			found = true
+			return nil
+		},
+	)
+	if err != nil {
+		return "", 0, err
+	}
+	if !found {
+		return "", 0, ErrNotFound
+	}
+	return stateJSON, updatedAt, nil
+}
+
+func (s *SQLiteStore) UpsertFocusState(_ context.Context, userID, stateJSON string, updatedAt int64) (int64, error) {
+	now := time.Now().UTC().UnixMilli()
+	if updatedAt > now {
+		now = updatedAt
+	}
+	err := s.db.exec(
+		`INSERT INTO focus_states (user_id, state_json, updated_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(user_id) DO UPDATE SET
+		   state_json = excluded.state_json,
+		   updated_at = excluded.updated_at`,
+		userID, stateJSON, now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return now, nil
 }
 
 func max64(a, b int64) int64 {

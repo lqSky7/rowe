@@ -15,6 +15,7 @@ public struct WorkspaceSnapshot: Codable, Sendable {
     public var serverURL: String?
     public var lastSyncServerTimeMs: Int64
     public var dirtyDocumentIds: [String]
+    public var focusBehavior: FocusBehaviorState
 
     public init(
         schemaVersion: Int = 1,
@@ -30,7 +31,8 @@ public struct WorkspaceSnapshot: Codable, Sendable {
         authSession: AuthSession? = nil,
         serverURL: String? = nil,
         lastSyncServerTimeMs: Int64 = 0,
-        dirtyDocumentIds: [String] = []
+        dirtyDocumentIds: [String] = [],
+        focusBehavior: FocusBehaviorState = FocusBehaviorState()
     ) {
         self.schemaVersion = schemaVersion
         self.space = space
@@ -46,11 +48,12 @@ public struct WorkspaceSnapshot: Codable, Sendable {
         self.serverURL = serverURL
         self.lastSyncServerTimeMs = lastSyncServerTimeMs
         self.dirtyDocumentIds = dirtyDocumentIds
+        self.focusBehavior = focusBehavior
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, space, folders, tags, sidebarSections, documents, sharedDocuments, connections, settings
-        case vaultEnvelope, authSession, serverURL, lastSyncServerTimeMs, dirtyDocumentIds
+        case vaultEnvelope, authSession, serverURL, lastSyncServerTimeMs, dirtyDocumentIds, focusBehavior
     }
 
     public init(from decoder: Decoder) throws {
@@ -69,6 +72,7 @@ public struct WorkspaceSnapshot: Codable, Sendable {
         serverURL = try c.decodeIfPresent(String.self, forKey: .serverURL)
         lastSyncServerTimeMs = try c.decodeIfPresent(Int64.self, forKey: .lastSyncServerTimeMs) ?? 0
         dirtyDocumentIds = try c.decodeIfPresent([String].self, forKey: .dirtyDocumentIds) ?? []
+        focusBehavior = try c.decodeIfPresent(FocusBehaviorState.self, forKey: .focusBehavior) ?? FocusBehaviorState()
     }
 }
 

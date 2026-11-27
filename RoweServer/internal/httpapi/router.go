@@ -46,10 +46,12 @@ func NewRouter(st store.Store, cfg config.Config) http.Handler {
 	mux.Handle("GET /api/v1/vault", requireAuth(http.HandlerFunc(vaultH.GetVault)))
 	mux.Handle("PUT /api/v1/vault", requireAuth(http.HandlerFunc(vaultH.PutVault)))
 
-	// Delta Sync, Real-Time SSE Hooks & Document routes
+	// Delta Sync, Real-Time SSE Hooks, Focus State & Document routes
 	mux.Handle("GET /api/v1/sync/events", requireAuth(http.HandlerFunc(syncH.Events)))
 	mux.Handle("GET /api/v1/sync/pull", requireAuth(http.HandlerFunc(syncH.Pull)))
 	mux.Handle("POST /api/v1/sync/push", requireAuth(http.HandlerFunc(syncH.Push)))
+	mux.Handle("GET /api/v1/focus/state", requireAuth(http.HandlerFunc(syncH.GetFocusState)))
+	mux.Handle("PUT /api/v1/focus/state", requireAuth(http.HandlerFunc(syncH.PutFocusState)))
 	mux.Handle("GET /api/v1/documents/{id}", requireAuth(http.HandlerFunc(syncH.GetDocument)))
 	mux.Handle("DELETE /api/v1/documents/{id}", requireAuth(http.HandlerFunc(syncH.DeleteDocument)))
 

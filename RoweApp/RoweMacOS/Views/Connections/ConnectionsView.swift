@@ -5,8 +5,28 @@ import RoweCore
 struct ConnectionsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
-    @State private var selectedConnection: ConnectionItem?
+    @State private var activeEditor: ConnectionEditorMode?
     @State private var copiedId: String?
+
+    private enum ConnectionEditorMode: Identifiable {
+        case create(ConnectionItem)
+        case edit(ConnectionItem)
+
+        var id: String {
+            switch self {
+            case .create(let c): return "create-\(c.id)"
+            case .edit(let c): return "edit-\(c.id)"
+            }
+        }
+    }
+
+    private var accent: Color {
+        Color(hex: store.settings.accentColor.hex)
+    }
+
+    private var reduceMotion: Bool {
+        store.settings.reduceAnimations
+    }
 
     private var mcpConnections: [ConnectionItem] {
         store.connections.filter { $0.kind == .mcp }
@@ -16,24 +36,6 @@ struct ConnectionsView: View {
         store.connections.filter { $0.kind == .api }
     }
 
-    private static let mcpPalette = GlassGlowPalette(
-        Color(red: 0.76, green: 0.87, blue: 0.99),
-        Color(red: 0.56, green: 0.72, blue: 0.96),
-        Color(red: 0.86, green: 0.92, blue: 1.0)
-    )
-
-    private static let apiPalette = GlassGlowPalette(
-        Color(red: 0.98, green: 0.85, blue: 0.76),
-        Color(red: 0.92, green: 0.72, blue: 0.64),
-        Color(red: 0.99, green: 0.91, blue: 0.84)
-    )
-
-    private static let heroPalette = GlassGlowPalette(
-        Color(white: 0.96),
-        Color(red: 0.74, green: 0.85, blue: 0.97),
-        Color(red: 0.86, green: 0.90, blue: 0.95)
-    )
-
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -42,7 +44,7 @@ struct ConnectionsView: View {
                     .padding(.trailing, 20)
                     .padding(.top, 14)
                     .padding(.bottom, 10)
-                    .animation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: store.isLeftSidebarVisible)
+                    .animation(CraftTheme.craftSpring(reduceMotion: reduceMotion), value: store.isLeftSidebarVisible)
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 30) {
@@ -52,18 +54,17 @@ struct ConnectionsView: View {
                             title: "MCP Connections",
                             subtitle: "Model Context Protocol endpoints for AI assistants",
                             items: mcpConnections,
-                            kind: .mcp,
-                            palette: Self.mcpPalette
+                            kind: .mcp
                         )
 
                         connectionSection(
                             title: "API Connections",
                             subtitle: "REST & Webhook endpoints for automations and shortcuts",
                             items: apiConnections,
-                            kind: .api,
-                            palette: Self.apiPalette
+                            kind: .api
                         )
                     }
+                    .animation(CraftTheme.craftSpring(reduceMotion: reduceMotion), value: store.connections.map(\.id))
                     .frame(maxWidth: 820, alignment: .leading)
                     .padding(.horizontal, 40)
                     .padding(.top, 10)
@@ -72,32 +73,67 @@ struct ConnectionsView: View {
                 }
             }
 
-            if let conn = selectedConnection {
+            if let mode = activeEditor {
                 Color.black.opacity(0.22)
                     .ignoresSafeArea()
                     .onTapGesture {
-                        withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                            selectedConnection = nil
+                        withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                            activeEditor = nil
                         }
                     }
 
-                ConnectionDetailsPopover(
-                    connection: conn,
-                    onUpdate: { updated in
-                        store.updateConnection(updated)
-                        selectedConnection = updated
-                    },
-                    onDelete: {
-                        HapticsManager.shared.destructive()
-                        store.deleteConnection(id: conn.id)
-                        selectedConnection = nil
-                    },
-                    onClose: {
-                        selectedConnection = nil
-                    }
-                )
-                .transition(.roweConvergeUnblur)
+                switch mode {
+                case .create(let draft):
+                    ConnectionDetailsPopover(
+                        connection: draft,
+                        isNew: true,
+                        onSave: { created in
+                            HapticsManager.shared.tap()
+                            withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                store.saveConnection(created)
+                                activeEditor = nil
+                            }
+                        },
+                        onDelete: nil,
+                        onClose: {
+                            withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                activeEditor = nil
+                            }
+                        }
+                    )
+                    .transition(.roweConvergeUnblur)
+
+                case .edit(let existing):
+                    ConnectionDetailsPopover(
+                        connection: existing,
+                        isNew: false,
+                        onSave: { updated in
+                            store.updateConnection(updated)
+                        },
+                        onDelete: {
+                            HapticsManager.shared.destructive()
+                            withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                store.deleteConnection(id: existing.id)
+                                activeEditor = nil
+                            }
+                        },
+                        onClose: {
+                            withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                activeEditor = nil
+                            }
+                        }
+                    )
+                    .transition(.roweConvergeUnblur)
+                }
             }
+        }
+        .animation(CraftTheme.craftSpring(reduceMotion: reduceMotion), value: activeEditor?.id)
+    }
+
+    private func openDraft(kind: ConnectionKind) {
+        HapticsManager.shared.tap()
+        withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+            activeEditor = .create(store.makeDraftConnection(kind: kind))
         }
     }
 
@@ -113,10 +149,10 @@ struct ConnectionsView: View {
                 size: 32,
                 items: [
                     RoweGlassActionMenuItem(title: "New MCP Connection", icon: "cpu") {
-                        selectedConnection = store.addConnection(kind: .mcp)
+                        openDraft(kind: .mcp)
                     },
                     RoweGlassActionMenuItem(title: "New API Connection", icon: "network") {
-                        selectedConnection = store.addConnection(kind: .api)
+                        openDraft(kind: .api)
                     }
                 ]
             )
@@ -129,6 +165,7 @@ struct ConnectionsView: View {
             Text("\(store.connections.count) Active")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
+                .contentTransition(.numericText())
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)
                 .roweGlassCapsule(interactive: false)
@@ -137,18 +174,8 @@ struct ConnectionsView: View {
 
     private var heroBanner: some View {
         HStack(spacing: 24) {
-            ZStack {
-                if colorScheme == .light {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Color(hex: "#16181D"))
-                        .frame(width: 84, height: 84)
-                }
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 46, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 84, height: 84)
-                    .glassGlow(Self.heroPalette, speed: 0.76, glow: 1.05)
-            }
+            ConnectionsHeroArtwork(accentColor: accent)
+                .frame(width: 92, height: 92)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Connect Rowe to Your Tools")
@@ -162,10 +189,10 @@ struct ConnectionsView: View {
 
                 HStack(spacing: 10) {
                     GlassPillButton("Add MCP Server", systemImage: "cpu") {
-                        selectedConnection = store.addConnection(kind: .mcp)
+                        openDraft(kind: .mcp)
                     }
                     GlassPillButton("Add API Endpoint", systemImage: "network") {
-                        selectedConnection = store.addConnection(kind: .api)
+                        openDraft(kind: .api)
                     }
                 }
                 .padding(.top, 6)
@@ -188,8 +215,7 @@ struct ConnectionsView: View {
         title: String,
         subtitle: String,
         items: [ConnectionItem],
-        kind: ConnectionKind,
-        palette: GlassGlowPalette
+        kind: ConnectionKind
     ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
@@ -202,22 +228,21 @@ struct ConnectionsView: View {
                 }
                 Spacer()
                 GlassPillButton("New", systemImage: "plus") {
-                    selectedConnection = store.addConnection(kind: kind)
+                    openDraft(kind: kind)
                 }
             }
 
             if items.isEmpty {
                 Button {
-                    HapticsManager.shared.tap()
-                    selectedConnection = store.addConnection(kind: kind)
+                    openDraft(kind: kind)
                 } label: {
                     HStack(spacing: 14) {
-                        glowIconBadge(icon: kind == .mcp ? "cpu" : "network", palette: palette)
+                        ConnectionKindVectorBadge(kind: kind, accentColor: accent, size: 42)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("No \(kind.rawValue) connections yet")
                                 .font(.system(size: 13.5, weight: .semibold))
                                 .foregroundStyle(.primary)
-                            Text("Click to create your first \(kind.rawValue) endpoint")
+                            Text("Click to configure your first \(kind.rawValue) endpoint")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
@@ -234,41 +259,28 @@ struct ConnectionsView: View {
                     )
                 }
                 .buttonStyle(RowePressScaleButtonStyle())
+                .transition(.roweUnblur)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 245, maximum: 280), spacing: 16)], spacing: 16) {
                     ForEach(items) { item in
-                        connectionCard(item: item, palette: palette)
+                        connectionCard(item: item)
+                            .transition(.roweUnblur)
                     }
                 }
             }
         }
     }
 
-    private func glowIconBadge(icon: String, palette: GlassGlowPalette) -> some View {
-        ZStack {
-            if colorScheme == .light {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(hex: "#16181D"))
-                    .frame(width: 42, height: 42)
-            }
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 42, height: 42)
-                .glassGlow(palette, speed: 0.72, glow: 0.95)
-        }
-    }
-
-    private func connectionCard(item: ConnectionItem, palette: GlassGlowPalette) -> some View {
+    private func connectionCard(item: ConnectionItem) -> some View {
         Button {
             HapticsManager.shared.tap()
-            withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                selectedConnection = item
+            withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                activeEditor = .edit(item)
             }
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    glowIconBadge(icon: item.kind == .mcp ? "cpu" : "network", palette: palette)
+                    ConnectionKindVectorBadge(kind: item.kind, accentColor: accent, size: 42)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name)
@@ -352,17 +364,23 @@ struct ConnectionsView: View {
 }
 
 private struct ConnectionDetailsPopover: View {
+    @Environment(\.colorScheme) private var colorScheme
     @State var connection: ConnectionItem
-    var onUpdate: (ConnectionItem) -> Void
-    var onDelete: () -> Void
+    let isNew: Bool
+    var onSave: (ConnectionItem) -> Void
+    var onDelete: (() -> Void)?
     var onClose: () -> Void
 
     @State private var copiedBanner = false
 
+    private var canCreate: Bool {
+        !connection.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(connection.name)
+                Text(isNew ? "New \(connection.kind.rawValue) Connection" : connection.name)
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
                 Button {
@@ -382,7 +400,9 @@ private struct ConnectionDetailsPopover: View {
                 TextField("Name", text: $connection.name)
                     .textFieldStyle(.plain)
                     .multilineTextAlignment(.trailing)
-                    .onChange(of: connection.name) { _, _ in onUpdate(connection) }
+                    .onChange(of: connection.name) { _, _ in
+                        if !isNew { onSave(connection) }
+                    }
             }
 
             detailRow(icon: "link", label: "URL") {
@@ -393,7 +413,7 @@ private struct ConnectionDetailsPopover: View {
                     copiedBanner = true
                 } label: {
                     Text(copiedBanner ? "Copied!" : connection.endpointURL)
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(copiedBanner ? .green : .secondary)
                         .lineLimit(1)
                 }
@@ -405,7 +425,7 @@ private struct ConnectionDetailsPopover: View {
                     items: ConnectionDocumentScope.allCases,
                     selection: $connection.documentScope,
                     titleForItem: \.rawValue
-                ) { _ in onUpdate(connection) }
+                ) { _ in if !isNew { onSave(connection) } }
             }
 
             detailRow(icon: "lock", label: "Permission Level") {
@@ -413,7 +433,7 @@ private struct ConnectionDetailsPopover: View {
                     items: ConnectionPermission.allCases,
                     selection: $connection.permission,
                     titleForItem: \.rawValue
-                ) { _ in onUpdate(connection) }
+                ) { _ in if !isNew { onSave(connection) } }
             }
 
             detailRow(icon: "shield", label: "Access Mode") {
@@ -421,20 +441,49 @@ private struct ConnectionDetailsPopover: View {
                     items: ConnectionAccessMode.allCases,
                     selection: $connection.accessMode,
                     titleForItem: \.rawValue
-                ) { _ in onUpdate(connection) }
+                ) { _ in if !isNew { onSave(connection) } }
             }
 
             Divider().opacity(0.3)
 
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("Delete this \(connection.kind.rawValue)", systemImage: "trash")
+            if isNew {
+                HStack(spacing: 10) {
+                    Spacer()
+                    Button("Cancel") {
+                        HapticsManager.shared.tap()
+                        onClose()
+                    }
+                    .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+
+                    Button {
+                        onSave(connection)
+                    } label: {
+                        Text("Create Connection")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(Color.primary.opacity(canCreate ? 1.0 : 0.4)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canCreate)
+                }
+                .padding(.top, 2)
+            } else if let onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete this \(connection.kind.rawValue)", systemImage: "trash")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 4)
         }
         .padding(18)
         .frame(width: 400)
