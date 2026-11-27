@@ -10,8 +10,7 @@ import UIKit
 final class IOSLiveActivitySyncManager {
     static let shared = IOSLiveActivitySyncManager()
 
-    private var activeActivity: Activity<RoweSyncActivityAttributes>?
-    private var dismissTask: Task<Void, Never>?
+    private var activeActivityId: String?
     private var lastSyncedTaskTitle: String = "Calendar Tasks"
 
     private init() {}
@@ -52,7 +51,6 @@ final class IOSLiveActivitySyncManager {
             await store.syncWithBackend()
             let succeeded = !store.hasPendingCloudSync
             self.finishActivity(
-                spaceName: store.space.name,
                 phase: succeeded ? .synced : .offline,
                 taskTitle: taskTitle
             )
@@ -70,8 +68,6 @@ final class IOSLiveActivitySyncManager {
         pendingCount: Int
     ) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        dismissTask?.cancel()
-        dismissTask = nil
 
         let state = RoweSyncActivityAttributes.ContentState(
             phase: phase,
@@ -79,41 +75,67 @@ final class IOSLiveActivitySyncManager {
             pendingCount: pendingCount,
             updatedAt: Date()
         )
-        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60))
+        let staleDate = Date().addingTimeInterval(60)
 
-        if let existing = activeActivity ?? Activity<RoweSyncActivityAttributes>.activities.first {
-            activeActivity = existing
-            Task { await existing.update(content) }
+        if let existingId = activeActivityId ?? Activity<RoweSyncActivityAttributes>.activities.first?.id {
+            activeActivityId = existingId
+            Task.detached {
+                await Self.updateActivity(id: existingId, state: state, staleDate: staleDate)
+            }
         } else {
             let attrs = RoweSyncActivityAttributes(spaceName: spaceName)
+            let content = ActivityContent(state: state, staleDate: staleDate)
             if let created = try? Activity.request(attributes: attrs, content: content, pushType: nil) {
-                activeActivity = created
+                activeActivityId = created.id
             }
         }
     }
 
     private func finishActivity(
-        spaceName: String,
         phase: RoweSyncActivityAttributes.SyncPhase,
         taskTitle: String
     ) {
-        guard let activity = activeActivity ?? Activity<RoweSyncActivityAttributes>.activities.first else { return }
+        guard let targetId = activeActivityId ?? Activity<RoweSyncActivityAttributes>.activities.first?.id else { return }
         let finalState = RoweSyncActivityAttributes.ContentState(
             phase: phase,
             taskTitle: taskTitle,
             pendingCount: 0,
             updatedAt: Date()
         )
-        let content = ActivityContent(state: finalState, staleDate: nil)
-        Task {
-            await activity.update(content)
-            let dismissalDelay: TimeInterval = (phase == .synced) ? 2.5 : 3.5
-            await activity.end(content, dismissalPolicy: .after(Date().addingTimeInterval(dismissalDelay)))
+        let dismissalDelay: TimeInterval = (phase == .synced) ? 2.5 : 3.5
+
+        Task.detached {
+            await Self.endActivity(id: targetId, finalState: finalState, dismissalDelay: dismissalDelay)
             await MainActor.run {
-                if self.activeActivity?.id == activity.id {
-                    self.activeActivity = nil
+                if IOSLiveActivitySyncManager.shared.activeActivityId == targetId {
+                    IOSLiveActivitySyncManager.shared.activeActivityId = nil
                 }
             }
         }
+    }
+
+    private nonisolated static func updateActivity(
+        id: String,
+        state: RoweSyncActivityAttributes.ContentState,
+        staleDate: Date?
+    ) async {
+        guard let activity = Activity<RoweSyncActivityAttributes>.activities.first(where: { $0.id == id }) else {
+            return
+        }
+        let content = ActivityContent(state: state, staleDate: staleDate)
+        await activity.update(content)
+    }
+
+    private nonisolated static func endActivity(
+        id: String,
+        finalState: RoweSyncActivityAttributes.ContentState,
+        dismissalDelay: TimeInterval
+    ) async {
+        guard let activity = Activity<RoweSyncActivityAttributes>.activities.first(where: { $0.id == id }) else {
+            return
+        }
+        let content = ActivityContent(state: finalState, staleDate: nil)
+        await activity.update(content)
+        await activity.end(content, dismissalPolicy: .after(Date().addingTimeInterval(dismissalDelay)))
     }
 }
