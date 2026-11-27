@@ -170,6 +170,7 @@ private final class TaskInputNSTextView: NSTextView {
 struct TaskEditorPopover: View {
     @Bindable var store: WorkspaceStore
     let request: TaskEditorRequest
+    var onCommitTaskForFlight: ((ResolvedTaskItem, CGRect, CGRect) -> Void)? = nil
     var onClose: () -> Void
 
     @State private var text: String
@@ -181,15 +182,23 @@ struct TaskEditorPopover: View {
     @State private var attachedImages: [String]
     @State private var showSchedulePicker = false
     @State private var showDeadlinePicker = false
+    @State private var popoverFrame: CGRect = .zero
+    @State private var textFieldFrame: CGRect = .zero
 
     private var existingItem: ResolvedTaskItem? {
         if case .edit(let item) = request { return item }
         return nil
     }
 
-    init(store: WorkspaceStore, request: TaskEditorRequest, onClose: @escaping () -> Void) {
+    init(
+        store: WorkspaceStore,
+        request: TaskEditorRequest,
+        onCommitTaskForFlight: ((ResolvedTaskItem, CGRect, CGRect) -> Void)? = nil,
+        onClose: @escaping () -> Void
+    ) {
         self.store = store
         self.request = request
+        self.onCommitTaskForFlight = onCommitTaskForFlight
         self.onClose = onClose
         switch request {
         case .create(let defaultDate):
@@ -257,6 +266,11 @@ struct TaskEditorPopover: View {
                         }
                     )
                     .fixedSize(horizontal: false, vertical: true)
+                }
+                .onGeometryChange(for: CGRect.self) { proxy in
+                    proxy.frame(in: .named("macWindowSpace"))
+                } action: { frame in
+                    textFieldFrame = frame
                 }
                 .onChange(of: text) { _, _ in
                     if existingItem != nil { persistExistingChanges() }
@@ -401,6 +415,11 @@ struct TaskEditorPopover: View {
                 .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75)
         )
         .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named("macWindowSpace"))
+        } action: { frame in
+            popoverFrame = frame
+        }
     }
 
     private func attachImage(_ image: NSImage) {
@@ -456,25 +475,47 @@ struct TaskEditorPopover: View {
     }
 
     private func commitAndClose() {
-        if existingItem != nil {
+        if let item = existingItem {
             persistExistingChanges()
+            if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation, let onCommitTaskForFlight {
+                var updatedBlock = item.block
+                updatedBlock.content = text
+                var meta = updatedBlock.task ?? TaskMetadata(isInbox: item.isInbox)
+                meta.scheduleDate = scheduleDate
+                meta.deadlineDate = deadlineDate
+                meta.reminderDate = reminderDate
+                meta.repeatRule = repeatRule
+                meta.attachedImagesBase64 = attachedImages
+                meta.applyStateTransition(to: taskState)
+                updatedBlock.task = meta
+                let updatedItem = ResolvedTaskItem(
+                    block: updatedBlock,
+                    documentId: item.documentId,
+                    documentTitle: item.documentTitle,
+                    isInbox: item.isInbox
+                )
+                onCommitTaskForFlight(updatedItem, textFieldFrame, popoverFrame)
+                return
+            }
         } else {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty || !attachedImages.isEmpty {
-                withAnimation(CraftTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                    let created = store.addInboxTask(
-                        title: trimmed.isEmpty ? "Image Task" : trimmed,
-                        scheduleDate: scheduleDate,
-                        deadlineDate: deadlineDate,
-                        repeatRule: repeatRule,
-                        attachedImagesBase64: attachedImages
-                    )
-                    if reminderDate != nil || taskState != .pending {
-                        store.updateBlock(in: created.documentId, blockId: created.block.id) { blk in
-                            blk.task?.reminderDate = reminderDate
-                            blk.task?.applyStateTransition(to: taskState)
-                        }
+                let created = store.addInboxTask(
+                    title: trimmed.isEmpty ? "Image Task" : trimmed,
+                    scheduleDate: scheduleDate,
+                    deadlineDate: deadlineDate,
+                    repeatRule: repeatRule,
+                    attachedImagesBase64: attachedImages
+                )
+                if reminderDate != nil || taskState != .pending {
+                    store.updateBlock(in: created.documentId, blockId: created.block.id) { blk in
+                        blk.task?.reminderDate = reminderDate
+                        blk.task?.applyStateTransition(to: taskState)
                     }
+                }
+                if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation, let onCommitTaskForFlight {
+                    onCommitTaskForFlight(created, textFieldFrame, popoverFrame)
+                    return
                 }
             }
         }

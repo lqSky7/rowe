@@ -1,0 +1,668 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01C15052EE0EB50746C23151 /* DownsyncWave.metal in Sources */ = {isa = PBXBuildFile; fileRef = E193753FE8AE1AFB6D6CFDB6 /* DownsyncWave.metal */; };
+		03428351F86C6A83DC87212B /* IOSConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B70704190A651D72CCA2B5 /* IOSConnectionsView.swift */; };
+		0B87045802619BA601C79B9F /* LightModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91321BA1E68257EE88A9C634 /* LightModel.swift */; };
+		1CA45B826401D05FF9ECA710 /* IOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAEA3ECD00459027C4D59E36 /* IOSHomeView.swift */; };
+		1D19F2E98CFDFC9A4314AF33 /* IOSTaskEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A17D24118CE98CEED4848C /* IOSTaskEditorSheet.swift */; };
+		24C08AA5B698F093D170E35F /* IOSTaskBubbleFlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C30B5478900AFD04207638 /* IOSTaskBubbleFlight.swift */; };
+		24E8DA922A8C420BE9C4958A /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F240D5A798F5D6C3FE986D1D /* ActivityKit.framework */; };
+		27222CD69DDC8199123E32FF /* IOSLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F67D6362A8F48AF7FB33F49 /* IOSLoginSheet.swift */; };
+		28FDB6D06DEBB40E74F515C3 /* Wallpapers in Resources */ = {isa = PBXBuildFile; fileRef = 3D7E4382BFBCA609C41B9F0F /* Wallpapers */; };
+		32887B99F7F5E384FCEC43AC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C4C9E47577330B0076FB5E8B /* Assets.xcassets */; };
+		3418B1ABEDB820A37518C4C1 /* IOSPinLockSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDFB0EF9C3099748AE7683B /* IOSPinLockSheet.swift */; };
+		351DEB74983E5769865010C3 /* GlassGlowRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3352407FD3E0F906873C2BCF /* GlassGlowRenderer.swift */; };
+		42EBA9DE0C863335239AF008 /* IOSFocusPatternsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622B3212C7EE3E7A9E25B016 /* IOSFocusPatternsView.swift */; };
+		44F92A52B5B97527764BBC39 /* IOSCalendarTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2BD0BD53D2CE2B9928A653A /* IOSCalendarTasksView.swift */; };
+		46835AF55C3C46EF675F5416 /* GlassGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 096CADD7926DDBAF77E13A62 /* GlassGlow.swift */; };
+		4BB40CA31B67C662ABE26A47 /* IOSStyleGallerySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F13A5ECFB702D81C8295980 /* IOSStyleGallerySheet.swift */; };
+		4C7CCA66E7E0B8474F362BF5 /* IOSFocusManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF433FFFAA523ECB1F8CB6A8 /* IOSFocusManager.swift */; };
+		5298DBE02F6A292F8BCF7F8B /* RoweOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CC6E30D00506509DA992C7C /* RoweOnboardingView.swift */; };
+		561792B04F13D9CBB1F26933 /* IOSTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DFD8E835BD4711769A0F7B1 /* IOSTheme.swift */; };
+		624BD0F3DE810D0DC817C2C1 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA04C7FC4C732955BA3CA1E9 /* Metal.framework */; };
+		69A07A72B7B8F573EC28B2F3 /* RoweOnboardingArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD6B0311D4DB982D27E3CF02 /* RoweOnboardingArtwork.swift */; };
+		6A129E9C4F8A803BEB18F7D1 /* GlassGlowStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B04B015C02E37F5071C3F41F /* GlassGlowStyle.swift */; };
+		6B2F104365FD47C87BC97DDA /* IOSRootShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D79DC0C4BED1E2F02DF418 /* IOSRootShellView.swift */; };
+		7494BEE071EBB1B142564A82 /* FamilyControls.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4AEA43300E56DEB564496CA4 /* FamilyControls.framework */; };
+		77004AB6496368703B9470D3 /* IOSDocumentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CAF87CE04AF5E2D01E5A5B9 /* IOSDocumentEditorView.swift */; };
+		8B98B71CAAA431790B0E8501 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 57AD2569B000A35216F28728 /* MetalKit.framework */; };
+		94BF921D9F7FBBB7135DCCA1 /* TaskBubbleLens.metal in Sources */ = {isa = PBXBuildFile; fileRef = AFADA0126FE47224CBD71DEE /* TaskBubbleLens.metal */; };
+		95B16D291E119C2730DFABDD /* DeviceActivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 77DFEA8A553A42EA6B16B795 /* DeviceActivity.framework */; };
+		991337509930118B8D770024 /* IOSLiveActivitySyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD84FFD54C5DD23016D8B901 /* IOSLiveActivitySyncManager.swift */; };
+		9D312B2E44880CE73CCAE57B /* RoweCore in Frameworks */ = {isa = PBXBuildFile; productRef = 9DD3858C0C08D0F8BC968E8D /* RoweCore */; };
+		A24E77B9215EC585E0BD6958 /* IOSDownsyncWaveOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3464C597129B9FC1DD94E23 /* IOSDownsyncWaveOverlay.swift */; };
+		A430A478921786BF68FA1F81 /* RoweSyncActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62247FDDB050BC1CB69EE2E5 /* RoweSyncActivityAttributes.swift */; };
+		AB653E34F1318F29E9FA4AE9 /* Engine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F3B51188682528A82494DE /* Engine.swift */; };
+		B51203DED490E6CEF6EAA21E /* ManagedSettings.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 08F443FA2322D7911D4663C6 /* ManagedSettings.framework */; };
+		B5D90EEF863A6C9DF707CCB1 /* RoweMathView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953284F04AEA37ECCF447DEE /* RoweMathView.swift */; };
+		C80316F18C066A590F7A60B5 /* RoweIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D8E867E8D13E1E4AA265F67 /* RoweIOSApp.swift */; };
+		CD91A0CAAB3837776C052B27 /* IOSAllDocsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7FF41C9925E962F28F53593 /* IOSAllDocsView.swift */; };
+		D917AC7121626BBD74E804A4 /* ConnectionsVectorArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B058169AE76E08A2FE8283 /* ConnectionsVectorArtwork.swift */; };
+		DF3A8CBAF5B8841AB0DFC505 /* IOSSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97BF7C0760ACA1B0B3F31333 /* IOSSettingsView.swift */; };
+		E3B73656838D6BB5FCA772A2 /* GlowSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD432E09E5E464BF851308A /* GlowSurface.swift */; };
+		EB3C1B43DE3D89FF258CBE63 /* CryptoKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8EABD0067E39565CC8D586BE /* CryptoKit.framework */; };
+		EBE889122753B084B0E8F046 /* GlassGlow.metal in Sources */ = {isa = PBXBuildFile; fileRef = E6E247D93E8E6510037E8D31 /* GlassGlow.metal */; };
+		EFB13B30470FBC711AC78777 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E269D270548D123AF6F7FF1 /* QuartzCore.framework */; };
+		F32F2AB52C4F7CF37AE5C4BB /* IOSGlassComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC2612E2AE42E858F14637F /* IOSGlassComponents.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		08F443FA2322D7911D4663C6 /* ManagedSettings.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ManagedSettings.framework; path = System/Library/Frameworks/ManagedSettings.framework; sourceTree = SDKROOT; };
+		096CADD7926DDBAF77E13A62 /* GlassGlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassGlow.swift; sourceTree = "<group>"; };
+		1CDFB0EF9C3099748AE7683B /* IOSPinLockSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPinLockSheet.swift; sourceTree = "<group>"; };
+		3352407FD3E0F906873C2BCF /* GlassGlowRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassGlowRenderer.swift; sourceTree = "<group>"; };
+		3CC6E30D00506509DA992C7C /* RoweOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoweOnboardingView.swift; sourceTree = "<group>"; };
+		3D7E4382BFBCA609C41B9F0F /* Wallpapers */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Wallpapers; path = Resources/Wallpapers; sourceTree = SOURCE_ROOT; };
+		3F67D6362A8F48AF7FB33F49 /* IOSLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSLoginSheet.swift; sourceTree = "<group>"; };
+		419F592D9267886055792244 /* RoweDev.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RoweDev.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		42A17D24118CE98CEED4848C /* IOSTaskEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSTaskEditorSheet.swift; sourceTree = "<group>"; };
+		4AC2612E2AE42E858F14637F /* IOSGlassComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSGlassComponents.swift; sourceTree = "<group>"; };
+		4AEA43300E56DEB564496CA4 /* FamilyControls.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FamilyControls.framework; path = System/Library/Frameworks/FamilyControls.framework; sourceTree = SDKROOT; };
+		4BD432E09E5E464BF851308A /* GlowSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlowSurface.swift; sourceTree = "<group>"; };
+		4E269D270548D123AF6F7FF1 /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
+		52F3B51188682528A82494DE /* Engine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Engine.swift; sourceTree = "<group>"; };
+		57AD2569B000A35216F28728 /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		62247FDDB050BC1CB69EE2E5 /* RoweSyncActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoweSyncActivityAttributes.swift; sourceTree = "<group>"; };
+		622B3212C7EE3E7A9E25B016 /* IOSFocusPatternsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSFocusPatternsView.swift; sourceTree = "<group>"; };
+		6CAF87CE04AF5E2D01E5A5B9 /* IOSDocumentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSDocumentEditorView.swift; sourceTree = "<group>"; };
+		6DFD8E835BD4711769A0F7B1 /* IOSTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSTheme.swift; sourceTree = "<group>"; };
+		6F13A5ECFB702D81C8295980 /* IOSStyleGallerySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSStyleGallerySheet.swift; sourceTree = "<group>"; };
+		77DFEA8A553A42EA6B16B795 /* DeviceActivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = DeviceActivity.framework; path = System/Library/Frameworks/DeviceActivity.framework; sourceTree = SDKROOT; };
+		7D8E867E8D13E1E4AA265F67 /* RoweIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoweIOSApp.swift; sourceTree = "<group>"; };
+		8EABD0067E39565CC8D586BE /* CryptoKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CryptoKit.framework; path = System/Library/Frameworks/CryptoKit.framework; sourceTree = SDKROOT; };
+		90D79DC0C4BED1E2F02DF418 /* IOSRootShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSRootShellView.swift; sourceTree = "<group>"; };
+		91321BA1E68257EE88A9C634 /* LightModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LightModel.swift; sourceTree = "<group>"; };
+		953284F04AEA37ECCF447DEE /* RoweMathView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoweMathView.swift; sourceTree = "<group>"; };
+		97BF7C0760ACA1B0B3F31333 /* IOSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSSettingsView.swift; sourceTree = "<group>"; };
+		A1B058169AE76E08A2FE8283 /* ConnectionsVectorArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionsVectorArtwork.swift; sourceTree = "<group>"; };
+		AA04C7FC4C732955BA3CA1E9 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		AFADA0126FE47224CBD71DEE /* TaskBubbleLens.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = TaskBubbleLens.metal; sourceTree = "<group>"; };
+		B04B015C02E37F5071C3F41F /* GlassGlowStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassGlowStyle.swift; sourceTree = "<group>"; };
+		B2BD0BD53D2CE2B9928A653A /* IOSCalendarTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCalendarTasksView.swift; sourceTree = "<group>"; };
+		BD84FFD54C5DD23016D8B901 /* IOSLiveActivitySyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSLiveActivitySyncManager.swift; sourceTree = "<group>"; };
+		C3464C597129B9FC1DD94E23 /* IOSDownsyncWaveOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSDownsyncWaveOverlay.swift; sourceTree = "<group>"; };
+		C4C9E47577330B0076FB5E8B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D3C30B5478900AFD04207638 /* IOSTaskBubbleFlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSTaskBubbleFlight.swift; sourceTree = "<group>"; };
+		DE4CD86DF15F142D7CDA8BD0 /* RoweCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RoweCore; path = ../RoweCore; sourceTree = SOURCE_ROOT; };
+		E193753FE8AE1AFB6D6CFDB6 /* DownsyncWave.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = DownsyncWave.metal; sourceTree = "<group>"; };
+		E6E247D93E8E6510037E8D31 /* GlassGlow.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = GlassGlow.metal; sourceTree = "<group>"; };
+		F240D5A798F5D6C3FE986D1D /* ActivityKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ActivityKit.framework; path = System/Library/Frameworks/ActivityKit.framework; sourceTree = SDKROOT; };
+		F3B70704190A651D72CCA2B5 /* IOSConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSConnectionsView.swift; sourceTree = "<group>"; };
+		F7FF41C9925E962F28F53593 /* IOSAllDocsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSAllDocsView.swift; sourceTree = "<group>"; };
+		FAEA3ECD00459027C4D59E36 /* IOSHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSHomeView.swift; sourceTree = "<group>"; };
+		FD6B0311D4DB982D27E3CF02 /* RoweOnboardingArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoweOnboardingArtwork.swift; sourceTree = "<group>"; };
+		FF433FFFAA523ECB1F8CB6A8 /* IOSFocusManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSFocusManager.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DF50B6B5DDAEEF5FF0019FE1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D312B2E44880CE73CCAE57B /* RoweCore in Frameworks */,
+				24E8DA922A8C420BE9C4958A /* ActivityKit.framework in Frameworks */,
+				7494BEE071EBB1B142564A82 /* FamilyControls.framework in Frameworks */,
+				95B16D291E119C2730DFABDD /* DeviceActivity.framework in Frameworks */,
+				B51203DED490E6CEF6EAA21E /* ManagedSettings.framework in Frameworks */,
+				624BD0F3DE810D0DC817C2C1 /* Metal.framework in Frameworks */,
+				8B98B71CAAA431790B0E8501 /* MetalKit.framework in Frameworks */,
+				EFB13B30470FBC711AC78777 /* QuartzCore.framework in Frameworks */,
+				EB3C1B43DE3D89FF258CBE63 /* CryptoKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0B61C11CFEA6812B32D1FB6F /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B8EAEBCBCD35856634BFFD3B /* Auth */,
+				9FAAC0EC5C88254AAA2028F9 /* Connections */,
+				DE0470EF48763F1EB4A7C75D /* Documents */,
+				F5E7C0ED2A50712CC68016E9 /* Editor */,
+				5874D5059505503CA67DC0CA /* Home */,
+				F30BCE97FEEAA26ADA7F5AC8 /* Settings */,
+				4F40AF180A3B2AB815962CD4 /* Shell */,
+				5DDCB3F1F7F8CA38367EC3EA /* Tasks */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		2B9EB1DC983F5128D59E4A5A /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				FF433FFFAA523ECB1F8CB6A8 /* IOSFocusManager.swift */,
+				BD84FFD54C5DD23016D8B901 /* IOSLiveActivitySyncManager.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		3C4996318CE4ACB6C8346BAA = {
+			isa = PBXGroup;
+			children = (
+				3D7E4382BFBCA609C41B9F0F /* Wallpapers */,
+				6825C468D03E6F30719DE06C /* App */,
+				81993C9DB17A4FF7FEA4C1F7 /* DesignSystem */,
+				BC8EA2708D7F14B4A60F4B4C /* LiveActivity */,
+				BFC44BAE4C9BAEEFB27A2D23 /* Packages */,
+				AA357E4AB97E01F9BC7048EF /* Resources */,
+				DCDA4C5A37BD149F1DC892F0 /* RoweShared */,
+				2B9EB1DC983F5128D59E4A5A /* Services */,
+				C670D29974487207CB6461F5 /* Shaders */,
+				0B61C11CFEA6812B32D1FB6F /* Views */,
+				9C053CB38B4EF9A70FCD755D /* Frameworks */,
+				D93B836E560B0780757227AE /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4F40AF180A3B2AB815962CD4 /* Shell */ = {
+			isa = PBXGroup;
+			children = (
+				90D79DC0C4BED1E2F02DF418 /* IOSRootShellView.swift */,
+			);
+			path = Shell;
+			sourceTree = "<group>";
+		};
+		5874D5059505503CA67DC0CA /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				FAEA3ECD00459027C4D59E36 /* IOSHomeView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		5DDCB3F1F7F8CA38367EC3EA /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				B2BD0BD53D2CE2B9928A653A /* IOSCalendarTasksView.swift */,
+				C3464C597129B9FC1DD94E23 /* IOSDownsyncWaveOverlay.swift */,
+				D3C30B5478900AFD04207638 /* IOSTaskBubbleFlight.swift */,
+				42A17D24118CE98CEED4848C /* IOSTaskEditorSheet.swift */,
+			);
+			path = Tasks;
+			sourceTree = "<group>";
+		};
+		6825C468D03E6F30719DE06C /* App */ = {
+			isa = PBXGroup;
+			children = (
+				7D8E867E8D13E1E4AA265F67 /* RoweIOSApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		6A594A130C32E84A0BA90D90 /* Math */ = {
+			isa = PBXGroup;
+			children = (
+				953284F04AEA37ECCF447DEE /* RoweMathView.swift */,
+			);
+			path = Math;
+			sourceTree = "<group>";
+		};
+		81993C9DB17A4FF7FEA4C1F7 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				4AC2612E2AE42E858F14637F /* IOSGlassComponents.swift */,
+				6DFD8E835BD4711769A0F7B1 /* IOSTheme.swift */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		8595A035A8391B72C462D32D /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				FD6B0311D4DB982D27E3CF02 /* RoweOnboardingArtwork.swift */,
+				3CC6E30D00506509DA992C7C /* RoweOnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		9C053CB38B4EF9A70FCD755D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F240D5A798F5D6C3FE986D1D /* ActivityKit.framework */,
+				8EABD0067E39565CC8D586BE /* CryptoKit.framework */,
+				77DFEA8A553A42EA6B16B795 /* DeviceActivity.framework */,
+				4AEA43300E56DEB564496CA4 /* FamilyControls.framework */,
+				08F443FA2322D7911D4663C6 /* ManagedSettings.framework */,
+				AA04C7FC4C732955BA3CA1E9 /* Metal.framework */,
+				57AD2569B000A35216F28728 /* MetalKit.framework */,
+				4E269D270548D123AF6F7FF1 /* QuartzCore.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		9FAAC0EC5C88254AAA2028F9 /* Connections */ = {
+			isa = PBXGroup;
+			children = (
+				F3B70704190A651D72CCA2B5 /* IOSConnectionsView.swift */,
+			);
+			path = Connections;
+			sourceTree = "<group>";
+		};
+		A2E80E057A02F5AB734825C9 /* Artwork */ = {
+			isa = PBXGroup;
+			children = (
+				A1B058169AE76E08A2FE8283 /* ConnectionsVectorArtwork.swift */,
+			);
+			path = Artwork;
+			sourceTree = "<group>";
+		};
+		AA357E4AB97E01F9BC7048EF /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C4C9E47577330B0076FB5E8B /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		B8EAEBCBCD35856634BFFD3B /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				3F67D6362A8F48AF7FB33F49 /* IOSLoginSheet.swift */,
+				1CDFB0EF9C3099748AE7683B /* IOSPinLockSheet.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		BC8EA2708D7F14B4A60F4B4C /* LiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				62247FDDB050BC1CB69EE2E5 /* RoweSyncActivityAttributes.swift */,
+			);
+			path = LiveActivity;
+			sourceTree = "<group>";
+		};
+		BFC44BAE4C9BAEEFB27A2D23 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				DE4CD86DF15F142D7CDA8BD0 /* RoweCore */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		C670D29974487207CB6461F5 /* Shaders */ = {
+			isa = PBXGroup;
+			children = (
+				E193753FE8AE1AFB6D6CFDB6 /* DownsyncWave.metal */,
+				E6E247D93E8E6510037E8D31 /* GlassGlow.metal */,
+				AFADA0126FE47224CBD71DEE /* TaskBubbleLens.metal */,
+			);
+			name = Shaders;
+			path = Resources/Shaders;
+			sourceTree = "<group>";
+		};
+		CFD3E901E887F9F6091463CA /* GlassGlow */ = {
+			isa = PBXGroup;
+			children = (
+				52F3B51188682528A82494DE /* Engine.swift */,
+				096CADD7926DDBAF77E13A62 /* GlassGlow.swift */,
+				3352407FD3E0F906873C2BCF /* GlassGlowRenderer.swift */,
+				B04B015C02E37F5071C3F41F /* GlassGlowStyle.swift */,
+				4BD432E09E5E464BF851308A /* GlowSurface.swift */,
+				91321BA1E68257EE88A9C634 /* LightModel.swift */,
+			);
+			path = GlassGlow;
+			sourceTree = "<group>";
+		};
+		D93B836E560B0780757227AE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				419F592D9267886055792244 /* RoweDev.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		DCDA4C5A37BD149F1DC892F0 /* RoweShared */ = {
+			isa = PBXGroup;
+			children = (
+				A2E80E057A02F5AB734825C9 /* Artwork */,
+				CFD3E901E887F9F6091463CA /* GlassGlow */,
+				6A594A130C32E84A0BA90D90 /* Math */,
+				8595A035A8391B72C462D32D /* Onboarding */,
+			);
+			name = RoweShared;
+			path = ../RoweShared;
+			sourceTree = "<group>";
+		};
+		DE0470EF48763F1EB4A7C75D /* Documents */ = {
+			isa = PBXGroup;
+			children = (
+				F7FF41C9925E962F28F53593 /* IOSAllDocsView.swift */,
+			);
+			path = Documents;
+			sourceTree = "<group>";
+		};
+		F30BCE97FEEAA26ADA7F5AC8 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				622B3212C7EE3E7A9E25B016 /* IOSFocusPatternsView.swift */,
+				97BF7C0760ACA1B0B3F31333 /* IOSSettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		F5E7C0ED2A50712CC68016E9 /* Editor */ = {
+			isa = PBXGroup;
+			children = (
+				6CAF87CE04AF5E2D01E5A5B9 /* IOSDocumentEditorView.swift */,
+				6F13A5ECFB702D81C8295980 /* IOSStyleGallerySheet.swift */,
+			);
+			path = Editor;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F4D98E0925E5235CEC496E07 /* RoweIOSDev */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F8579C0A4223BE1BC098AC42 /* Build configuration list for PBXNativeTarget "RoweIOSDev" */;
+			buildPhases = (
+				1CB40C51DA939D97B86A1A3E /* Sources */,
+				FAABEBFF60108EC093B6A1D6 /* Resources */,
+				DF50B6B5DDAEEF5FF0019FE1 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RoweIOSDev;
+			packageProductDependencies = (
+				9DD3858C0C08D0F8BC968E8D /* RoweCore */,
+			);
+			productName = RoweIOSDev;
+			productReference = 419F592D9267886055792244 /* RoweDev.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CF6CD9C2E3220165DE63F211 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+			};
+			buildConfigurationList = A2996FB6E4AF72A0A85D8305 /* Build configuration list for PBXProject "RoweIOS-Dev" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 3C4996318CE4ACB6C8346BAA;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				96B633476B3E98C15545A7F0 /* XCLocalSwiftPackageReference "../RoweCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D93B836E560B0780757227AE /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F4D98E0925E5235CEC496E07 /* RoweIOSDev */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FAABEBFF60108EC093B6A1D6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				32887B99F7F5E384FCEC43AC /* Assets.xcassets in Resources */,
+				28FDB6D06DEBB40E74F515C3 /* Wallpapers in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1CB40C51DA939D97B86A1A3E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D917AC7121626BBD74E804A4 /* ConnectionsVectorArtwork.swift in Sources */,
+				01C15052EE0EB50746C23151 /* DownsyncWave.metal in Sources */,
+				AB653E34F1318F29E9FA4AE9 /* Engine.swift in Sources */,
+				EBE889122753B084B0E8F046 /* GlassGlow.metal in Sources */,
+				46835AF55C3C46EF675F5416 /* GlassGlow.swift in Sources */,
+				351DEB74983E5769865010C3 /* GlassGlowRenderer.swift in Sources */,
+				6A129E9C4F8A803BEB18F7D1 /* GlassGlowStyle.swift in Sources */,
+				E3B73656838D6BB5FCA772A2 /* GlowSurface.swift in Sources */,
+				CD91A0CAAB3837776C052B27 /* IOSAllDocsView.swift in Sources */,
+				44F92A52B5B97527764BBC39 /* IOSCalendarTasksView.swift in Sources */,
+				03428351F86C6A83DC87212B /* IOSConnectionsView.swift in Sources */,
+				77004AB6496368703B9470D3 /* IOSDocumentEditorView.swift in Sources */,
+				A24E77B9215EC585E0BD6958 /* IOSDownsyncWaveOverlay.swift in Sources */,
+				4C7CCA66E7E0B8474F362BF5 /* IOSFocusManager.swift in Sources */,
+				42EBA9DE0C863335239AF008 /* IOSFocusPatternsView.swift in Sources */,
+				F32F2AB52C4F7CF37AE5C4BB /* IOSGlassComponents.swift in Sources */,
+				1CA45B826401D05FF9ECA710 /* IOSHomeView.swift in Sources */,
+				991337509930118B8D770024 /* IOSLiveActivitySyncManager.swift in Sources */,
+				27222CD69DDC8199123E32FF /* IOSLoginSheet.swift in Sources */,
+				3418B1ABEDB820A37518C4C1 /* IOSPinLockSheet.swift in Sources */,
+				6B2F104365FD47C87BC97DDA /* IOSRootShellView.swift in Sources */,
+				DF3A8CBAF5B8841AB0DFC505 /* IOSSettingsView.swift in Sources */,
+				4BB40CA31B67C662ABE26A47 /* IOSStyleGallerySheet.swift in Sources */,
+				24C08AA5B698F093D170E35F /* IOSTaskBubbleFlight.swift in Sources */,
+				1D19F2E98CFDFC9A4314AF33 /* IOSTaskEditorSheet.swift in Sources */,
+				561792B04F13D9CBB1F26933 /* IOSTheme.swift in Sources */,
+				0B87045802619BA601C79B9F /* LightModel.swift in Sources */,
+				C80316F18C066A590F7A60B5 /* RoweIOSApp.swift in Sources */,
+				B5D90EEF863A6C9DF707CCB1 /* RoweMathView.swift in Sources */,
+				69A07A72B7B8F573EC28B2F3 /* RoweOnboardingArtwork.swift in Sources */,
+				5298DBE02F6A292F8BCF7F8B /* RoweOnboardingView.swift in Sources */,
+				A430A478921786BF68FA1F81 /* RoweSyncActivityAttributes.swift in Sources */,
+				94BF921D9F7FBBB7135DCCA1 /* TaskBubbleLens.metal in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4445F05AD7C9DF53536B92DF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 9F946WAJQ7;
+				INFOPLIST_FILE = "Info-Dev.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.rowe.ios.dev;
+				PRODUCT_NAME = RoweDev;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4CD3C9174D46E3581BF742FC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		563B3CE09F9FE6C1C461060C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		77A8E9319CEAFEF7D194F9B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 9F946WAJQ7;
+				INFOPLIST_FILE = "Info-Dev.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.rowe.ios.dev;
+				PRODUCT_NAME = RoweDev;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A2996FB6E4AF72A0A85D8305 /* Build configuration list for PBXProject "RoweIOS-Dev" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4CD3C9174D46E3581BF742FC /* Debug */,
+				563B3CE09F9FE6C1C461060C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F8579C0A4223BE1BC098AC42 /* Build configuration list for PBXNativeTarget "RoweIOSDev" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4445F05AD7C9DF53536B92DF /* Debug */,
+				77A8E9319CEAFEF7D194F9B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		96B633476B3E98C15545A7F0 /* XCLocalSwiftPackageReference "../RoweCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../RoweCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9DD3858C0C08D0F8BC968E8D /* RoweCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RoweCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = CF6CD9C2E3220165DE63F211 /* Project object */;
+}

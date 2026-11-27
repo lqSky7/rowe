@@ -48,6 +48,11 @@ struct IOSRootShellView: View {
     @State private var showQuickAddSheet = false
     @State private var quickAddDefaultDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var editingTaskItem: ResolvedTaskItem? = nil
+    @State private var tabBarPillRect: CGRect = .zero
+    @State private var keyboardHeight: CGFloat = 0
+    @State private var lastKnownKeyboardHeight: CGFloat = 312
+    @State private var flightCoordinator = IOSTaskFlightCoordinator()
+    @State private var downsyncWaveCoordinator = IOSDownsyncWaveCoordinator()
     @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding")
     @Namespace private var composerMorphNS
 
@@ -99,79 +104,178 @@ struct IOSRootShellView: View {
                 calendarPath: $calendarPath,
                 hidesTabBar: shouldHideBottomControls,
                 resolvedAccent: resolvedAccent,
+                flightCoordinator: flightCoordinator,
+                downsyncWaveCoordinator: downsyncWaveCoordinator,
                 onOpenQuickAdd: { targetDate in
                     editingTaskItem = nil
                     quickAddDefaultDate = Calendar.current.startOfDay(for: targetDate ?? Date())
-                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
                         showQuickAddSheet = true
                     }
                 },
                 onEditTask: { item in
                     editingTaskItem = item
+                    flightCoordinator.activeEditingBlockId = item.block.id
                     quickAddDefaultDate = item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: Date())
-                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                        showQuickAddSheet = true
+                    if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation {
+                        // Mount the composer immediately (hidden while bubble flies) so the keyboard pre-triggers
+                        // and rises in parallel with the bubble flying straight to the above-keyboard position!
+                        var noAnim = Transaction()
+                        noAnim.disablesAnimations = true
+                        withTransaction(noAnim) {
+                            showQuickAddSheet = true
+                        }
+                        flightCoordinator.launchOpenForEdit(
+                            item: item,
+                            accentColor: resolvedAccent,
+                            isDarkMode: isDarkMode
+                        ) {}
+                    } else {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                            showQuickAddSheet = true
+                        }
                     }
                 },
-                onReplayOnboarding: { showOnboarding = true }
+                onReplayOnboarding: { showOnboarding = true },
+                onTabBarFrameChange: { rect in
+                    tabBarPillRect = rect
+                }
             )
             .ignoresSafeArea()
 
-            // Floating '+' button morphing smoothly into the centered Task Composer above the keyboard
-            if !shouldHideBottomControls && !showQuickAddSheet {
-                IOSGlassCircleButton(systemImage: "plus", size: 56, iconSize: 22) {
-                    if selectedTab == .calendar || selectedTab == .tasks {
+            // Smooth scrim behind expanded Task Composer
+            Color.black.opacity(showQuickAddSheet ? 0.32 : 0)
+                .ignoresSafeArea()
+                .allowsHitTesting(showQuickAddSheet)
+                .animation(.easeInOut(duration: 0.24), value: showQuickAddSheet)
+                .onTapGesture {
+                    IOSKeyboard.dismiss()
+                    flightCoordinator.activeEditingBlockId = nil
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
+                        showQuickAddSheet = false
                         editingTaskItem = nil
-                        quickAddDefaultDate = Calendar.current.startOfDay(for: Date())
-                        withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
-                            showQuickAddSheet = true
-                        }
-                    } else {
-                        IOSKeyboard.dismiss()
-                        let doc = store.createDocument(openImmediately: false)
-                        homePath.append(.document(doc.id))
                     }
                 }
-                .matchedGeometryEffect(id: "taskComposerMorph", in: composerMorphNS)
-                .padding(.trailing, 18)
-                .padding(.bottom, 20)
-                .ignoresSafeArea(.container, edges: .bottom)
-                .transition(.scale(scale: 0.85).combined(with: .opacity))
-            }
 
-            if showQuickAddSheet {
-                Color.black.opacity(0.32)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        IOSKeyboard.dismiss()
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                            showQuickAddSheet = false
-                            editingTaskItem = nil
+            // Native iOS 26 Liquid Glass morph between '+' button and Task Composer inside one shared
+            // ignoresSafeArea coordinate space so the keyboard never cancels or snaps the morph
+            if !shouldHideBottomControls {
+                GeometryReader { geo in
+                    let buttonSize: CGFloat = tabBarPillRect.height > 44
+                        ? min(max(tabBarPillRect.height - 8, 48), 52)
+                        : 50
+                    let centerY: CGFloat = tabBarPillRect.midY > 0
+                        ? tabBarPillRect.midY
+                        : (geo.size.height - 52)
+                    let collapsedBottom = max(12, geo.size.height - centerY - buttonSize / 2)
+                    let isOpeningForEdit = flightCoordinator.activeFlight?.direction == .openForEdit
+                    let expandedBottom = isOpeningForEdit
+                        ? (max(keyboardHeight, lastKnownKeyboardHeight) + 12)
+                        : max(keyboardHeight + 12, geo.safeAreaInsets.bottom + 14)
+                    let hideDuringFlight = flightCoordinator.activeFlight != nil && !showQuickAddSheet
+
+                    IOSGlassMorphContainer(spacing: 24) {
+                        ZStack(alignment: .bottomTrailing) {
+                            Color.clear
+                                .allowsHitTesting(false)
+
+                            if !showQuickAddSheet {
+                                Button {
+                                    if selectedTab == .calendar || selectedTab == .tasks {
+                                        IOSHaptics.shared.playComposerMorphHaptic(expanding: true)
+                                        editingTaskItem = nil
+                                        quickAddDefaultDate = Calendar.current.startOfDay(for: Date())
+                                        withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
+                                            showQuickAddSheet = true
+                                        }
+                                    } else {
+                                        IOSHaptics.shared.tap()
+                                        IOSKeyboard.dismiss()
+                                        let doc = store.createDocument(openImmediately: false)
+                                        homePath.append(.document(doc.id))
+                                    }
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 23, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                        .frame(width: buttonSize, height: buttonSize)
+                                        .contentShape(Circle())
+                                }
+                                .buttonStyle(RowePressScaleStyle())
+                                .roweIOSGlass(in: Circle(), interactive: true)
+                                .roweIOSGlassMorphID("taskComposerMorph", in: composerMorphNS)
+                                .opacity(hideDuringFlight ? 0 : 1)
+                                .scaleEffect(hideDuringFlight ? 0.72 : 1)
+                                .animation(.spring(response: 0.34, dampingFraction: 0.82), value: hideDuringFlight)
+                                .padding(.trailing, 18)
+                                .padding(.bottom, collapsedBottom)
+                            }
+
+                            if showQuickAddSheet {
+                                IOSQuickAddTaskCard(
+                                    store: store,
+                                    initialDate: quickAddDefaultDate,
+                                    editingItem: editingTaskItem,
+                                    embedGlassBackground: false,
+                                    immediateFocus: editingTaskItem != nil,
+                                    onCreatedTaskForFlight: { created, textFieldFrame, cardFrame in
+                                        IOSKeyboard.dismiss()
+                                        flightCoordinator.launchSettleToRow(
+                                            blockId: created.block.id,
+                                            title: created.block.content,
+                                            scheduleDate: created.block.task?.scheduleDate ?? Date(),
+                                            hasRepeat: created.block.task?.repeatRule != nil,
+                                            imageCount: created.block.task?.attachedImagesBase64.count ?? 0,
+                                            isInbox: created.isInbox,
+                                            accentColor: resolvedAccent,
+                                            isDarkMode: isDarkMode,
+                                            textFieldFrame: textFieldFrame,
+                                            composerCardFrame: cardFrame
+                                        )
+                                        flightCoordinator.activeEditingBlockId = nil
+                                        // Zero-frame handoff so the composer itself becomes the liquid glass bubble
+                                        var noAnim = Transaction()
+                                        noAnim.disablesAnimations = true
+                                        withTransaction(noAnim) {
+                                            showQuickAddSheet = false
+                                            editingTaskItem = nil
+                                        }
+                                    }
+                                ) {
+                                    IOSHaptics.shared.playComposerMorphHaptic(expanding: false)
+                                    IOSKeyboard.dismiss()
+                                    flightCoordinator.activeEditingBlockId = nil
+                                    withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+                                        showQuickAddSheet = false
+                                        editingTaskItem = nil
+                                    }
+                                }
+                                .frame(width: max(260, geo.size.width - 28))
+                                .roweIOSGlassRoundedRect(radius: 24, interactive: false)
+                                .roweIOSGlassMorphID("taskComposerMorph", in: composerMorphNS)
+                                .opacity(isOpeningForEdit ? 0 : 1)
+                                .allowsHitTesting(!isOpeningForEdit)
+                                .padding(.trailing, 14)
+                                .padding(.bottom, expandedBottom)
+                            }
                         }
                     }
-
-                VStack {
-                    Spacer(minLength: 0)
-                    IOSQuickAddTaskCard(
-                        store: store,
-                        initialDate: quickAddDefaultDate,
-                        editingItem: editingTaskItem
-                    ) {
-                        IOSKeyboard.dismiss()
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-                            showQuickAddSheet = false
-                            editingTaskItem = nil
-                        }
-                    }
-                    .id(editingTaskItem?.id ?? "create-new-task")
-                    .frame(maxWidth: .infinity)
-                    .matchedGeometryEffect(id: "taskComposerMorph", in: composerMorphNS)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .transition(.scale(scale: 0.92, anchor: .bottomTrailing).combined(with: .opacity))
+                .ignoresSafeArea()
             }
+
+            // Pure SwiftUI refracting Liquid Glass Bubble flight overlay (zero UIKit layerEffect conflicts)
+            IOSTaskBubbleFlightOverlay(
+                coordinator: flightCoordinator,
+                targetComposerBottomInset: max(keyboardHeight, lastKnownKeyboardHeight) + 12
+            )
+
+            // Top-to-bottom optical downsync shockwave + gradual dim (excluding newly synced tasks)
+            IOSDownsyncWaveOverlay(
+                waveCoordinator: downsyncWaveCoordinator,
+                flightCoordinator: flightCoordinator
+            )
 
             // Global Contextual Search (pull-down from anywhere on iOS, matching macOS QuickOpenPanel)
             if store.isQuickOpenPresented {
@@ -204,7 +308,22 @@ struct IOSRootShellView: View {
         .preferredColorScheme(preferredScheme)
         .tint(resolvedAccent)
         .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: shouldHideBottomControls)
-        .animation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations), value: showQuickAddSheet)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let screenH = UIScreen.main.bounds.height
+            let overlap = max(0, screenH - frame.minY)
+            if overlap > 120 {
+                lastKnownKeyboardHeight = overlap
+            }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                keyboardHeight = overlap
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
+                keyboardHeight = 0
+            }
+        }
         .overlay {
             if showOnboarding {
                 RoweOnboardingView(
@@ -240,6 +359,16 @@ struct IOSRootShellView: View {
         .onChange(of: store.settings.hasCompletedOnboarding) { _, completed in
             showOnboarding = !completed
         }
+        .onChange(of: store.downsyncWaveId) { _, _ in
+            guard !store.settings.reduceAnimations,
+                  store.settings.crazySyncAnimation,
+                  !store.downsyncedTaskIds.isEmpty else { return }
+            downsyncWaveCoordinator.trigger(
+                taskIds: store.downsyncedTaskIds,
+                isDarkMode: isDarkMode,
+                sourceView: flightCoordinator.snapshotSourceView
+            )
+        }
         .onAppear {
             IOSHaptics.shared.isEnabled = store.settings.enableHaptics
             if store.hasLoadedFromDisk && !store.settings.hasCompletedOnboarding {
@@ -259,6 +388,8 @@ final class CompactTabBarController: UITabBarController {
             }
         }
     }
+    var onTabBarFrameChange: ((CGRect) -> Void)?
+    private var lastReportedPillRect: CGRect = .zero
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -286,6 +417,54 @@ final class CompactTabBarController: UITabBarController {
             width: targetWidth,
             height: currentFrame.height
         )
+        tabBar.layoutIfNeeded()
+
+        let pillRect = resolveVisualTabBarPillRect()
+        if abs(pillRect.midY - lastReportedPillRect.midY) > 0.5 ||
+           abs(pillRect.height - lastReportedPillRect.height) > 0.5 {
+            lastReportedPillRect = pillRect
+            DispatchQueue.main.async { [weak self] in
+                self?.onTabBarFrameChange?(pillRect)
+            }
+        }
+    }
+
+    /// Measures the exact visual pill frame of the native UITabBar in `view` coordinates
+    /// across both iOS 26 floating Liquid Glass tab bars and classic bottom-anchored tab bars.
+    private func resolveVisualTabBarPillRect() -> CGRect {
+        let tf = tabBar.frame
+        let viewH = view.bounds.height
+        // Case 1: iOS 26 floating UITabBar where tabBar.frame itself floats above the bottom edge
+        if tf.height > 30 && tf.height <= 80 && tf.maxY < viewH - 4 {
+            return tf
+        }
+        // Case 2: Inspect up to 3 levels inside tabBar for the actual floating pill platter / tab buttons
+        var candidates: [CGRect] = []
+        func collect(from parent: UIView, depth: Int) {
+            guard depth <= 3 else { return }
+            for sub in parent.subviews where !sub.isHidden && sub.alpha > 0.01 {
+                let converted = sub.convert(sub.bounds, to: view)
+                if converted.height >= 44 && converted.height <= 74 && converted.width >= 44 && converted.maxY <= viewH {
+                    candidates.append(converted)
+                }
+                collect(from: sub, depth: depth + 1)
+            }
+        }
+        collect(from: tabBar, depth: 0)
+        // Prefer the widest pill/platter container (width > 120), otherwise union of tab buttons
+        if let platter = candidates.filter({ $0.width > 120 }).max(by: { $0.width < $1.width }) {
+            return platter
+        }
+        if let first = candidates.first {
+            let union = candidates.dropFirst().reduce(first) { $0.union($1) }
+            if union.height <= 74 {
+                return union
+            }
+        }
+        // Case 3: Classic bottom-anchored fallback above safeAreaInsets.bottom
+        let bottomSafe = view.safeAreaInsets.bottom
+        let contentH = max(49, tf.height - bottomSafe)
+        return CGRect(x: tf.minX, y: tf.minY, width: tf.width, height: contentH)
     }
 }
 
@@ -297,9 +476,12 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
     @Binding var calendarPath: [IOSRoute]
     let hidesTabBar: Bool
     let resolvedAccent: Color
+    let flightCoordinator: IOSTaskFlightCoordinator
+    let downsyncWaveCoordinator: IOSDownsyncWaveCoordinator
     let onOpenQuickAdd: (Date?) -> Void
     let onEditTask: (ResolvedTaskItem) -> Void
     let onReplayOnboarding: () -> Void
+    let onTabBarFrameChange: (CGRect) -> Void
 
     @Namespace private var homeZoomNS
     @Namespace private var tasksZoomNS
@@ -321,6 +503,8 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
         controller.selectedIndex = selectedTab.rawValue
         controller.tabBar.tintColor = UIColor(resolvedAccent)
         controller.hidesCompactTabBar = hidesTabBar
+        controller.onTabBarFrameChange = onTabBarFrameChange
+        flightCoordinator.snapshotSourceView = controller.view
         return controller
     }
 
@@ -331,6 +515,8 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
         }
         uiViewController.tabBar.tintColor = UIColor(resolvedAccent)
         uiViewController.hidesCompactTabBar = hidesTabBar
+        uiViewController.onTabBarFrameChange = onTabBarFrameChange
+        flightCoordinator.snapshotSourceView = uiViewController.view
 
         if let vcs = uiViewController.viewControllers, vcs.count == 3 {
             (vcs[0] as? UIHostingController<AnyView>)?.rootView = AnyView(homeNavStack)
@@ -374,6 +560,8 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
                 store: store,
                 mode: .allTasks,
                 zoomNamespace: tasksZoomNS,
+                flightCoordinator: flightCoordinator,
+                downsyncWaveCoordinator: downsyncWaveCoordinator,
                 onOpenSettings: { tasksPath.append(.settings) },
                 onOpenQuickAdd: onOpenQuickAdd,
                 onEditTask: onEditTask
@@ -391,6 +579,8 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
                 store: store,
                 mode: .calendar,
                 zoomNamespace: calendarZoomNS,
+                flightCoordinator: flightCoordinator,
+                downsyncWaveCoordinator: downsyncWaveCoordinator,
                 onOpenSettings: { calendarPath.append(.settings) },
                 onOpenQuickAdd: onOpenQuickAdd,
                 onEditTask: onEditTask
@@ -545,6 +735,9 @@ private struct IOSQuickOpenView: View {
                 .frame(width: 38, height: 4.5)
                 .padding(.top, 10)
                 .padding(.bottom, 6)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .iosDragToDismiss { dismissSearch() }
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
@@ -653,8 +846,7 @@ private struct IOSQuickOpenView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
         }
-        .roweIOSGlassRoundedRect(radius: 26, interactive: true)
-        .iosDragToDismiss { dismissSearch() }
+        .roweIOSGlassRoundedRect(radius: 26, interactive: false)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { isFocused = true }
         }

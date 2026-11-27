@@ -143,6 +143,8 @@ public final class WorkspaceStore {
     public var lastSuccessfulSyncAt: Date?
     public var syncPulseId: UUID = UUID()
     public var syncPulseDirection: SyncPulseDirection? = nil
+    public var downsyncWaveId: UUID = UUID()
+    public var downsyncedTaskIds: Set<String> = []
     public var hasLoadedFromDisk: Bool = false
     public var isSyncing: Bool = false
     public var isRealtimeSyncConnected: Bool = false
@@ -1265,7 +1267,7 @@ public final class WorkspaceStore {
             block.listStyle = .todo
             block.task?.applyStateTransition(to: state)
         }
-        scheduleDebouncedCloudSync(delayOverride: 0.25)
+        scheduleDebouncedCloudSync(delayOverride: 0.05)
     }
 
     @discardableResult
@@ -1298,7 +1300,7 @@ public final class WorkspaceStore {
         mutateBlocks(in: inboxDoc.id) { blocks in
             blocks.append(block)
         }
-        scheduleDebouncedCloudSync(delayOverride: 0.25)
+        scheduleDebouncedCloudSync(delayOverride: 0.05)
         onTaskMutatedForLiveSync?(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New task" : title)
         let item = ResolvedTaskItem(block: block, documentId: inboxDoc.id, documentTitle: inboxDoc.displayTitle, isInbox: true)
         if !inboxDoc.isLocked, let candidate = NudgeCandidateTask(from: item, in: inboxDoc) {
@@ -1959,6 +1961,8 @@ public final class WorkspaceStore {
             let sinceWatermark: Int64 = forceFullPull ? 0 : max(0, lastSyncServerTimeMs - 1000)
 
             // Step 1: Pull delta first so tombstones and concurrent edits on another device are applied safely
+            let previousWatermark = lastSyncServerTimeMs
+            let tasksBeforePull = Dictionary(allTasks().map { ($0.block.id, Self.taskSyncFingerprint(for: $0.block)) }, uniquingKeysWith: { first, _ in first })
             let pulled = try await withAuthorizedSession { sess in
                 try await self.backendClient.syncPull(serverURL: sess.serverURL, accessToken: sess.accessToken, sinceMs: sinceWatermark)
             }
@@ -1969,6 +1973,23 @@ public final class WorkspaceStore {
                 syncPulseDirection = .received
                 syncPulseId = UUID()
                 rebuildSearchIndex()
+                if !forceFullPull && previousWatermark > 0 {
+                    var newlyChangedTaskIds: Set<String> = []
+                    for item in allTasks() {
+                        let afterFP = Self.taskSyncFingerprint(for: item.block)
+                        if let beforeFP = tasksBeforePull[item.block.id] {
+                            if beforeFP != afterFP {
+                                newlyChangedTaskIds.insert(item.block.id)
+                            }
+                        } else {
+                            newlyChangedTaskIds.insert(item.block.id)
+                        }
+                    }
+                    if !newlyChangedTaskIds.isEmpty {
+                        downsyncedTaskIds = newlyChangedTaskIds
+                        downsyncWaveId = UUID()
+                    }
+                }
             }
 
             // Step 2: Build push payload AFTER applying remote tombstones so deleted docs are never resurrected
@@ -1991,13 +2012,17 @@ public final class WorkspaceStore {
                 lastSyncServerTimeMs = max(lastSyncServerTimeMs, pulled.serverTime)
             }
 
-            if let remoteVault = try? await withAuthorizedSession({ sess in
-                try await self.backendClient.getVault(serverURL: sess.serverURL, accessToken: sess.accessToken)
-            }) {
-                self.vaultEnvelope = remoteVault
+            let shouldCheckVault = forceFullPull || self.vaultEnvelope == nil
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if shouldCheckVault,
+                   let remoteVault = try? await self.withAuthorizedSession({ sess in
+                       try await self.backendClient.getVault(serverURL: sess.serverURL, accessToken: sess.accessToken)
+                   }) {
+                    self.vaultEnvelope = remoteVault
+                }
+                await self.syncFocusStateWithBackend()
             }
-
-            await syncFocusStateWithBackend()
 
             dirtyDocumentIds.subtract(pendingIds)
             dirtyDocumentIds.subtract(deletedRemoteIds)
@@ -2017,6 +2042,15 @@ public final class WorkspaceStore {
                 await self.syncWithBackend()
             }
         }
+    }
+
+    private static func taskSyncFingerprint(for block: Block) -> String {
+        let state = block.task?.state.rawValue ?? 0
+        let sched = block.task?.scheduleDate.map { String(Int($0.timeIntervalSince1970)) } ?? "none"
+        let repeatFreq = block.task?.repeatRule?.frequency.rawValue ?? "none"
+        let imgCount = block.task?.attachedImagesBase64.count ?? 0
+        let notes = block.task?.notes ?? ""
+        return "\(block.content)|\(state)|\(sched)|\(repeatFreq)|\(imgCount)|\(notes)"
     }
 
     private func mergeRemoteDocuments(_ remoteDocs: [SyncDocumentDTO], localDirtyIds: Set<String>) {

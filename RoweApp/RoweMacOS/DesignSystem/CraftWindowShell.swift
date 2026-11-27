@@ -14,6 +14,8 @@ struct CraftWindowShell: View {
     @State private var dragStartSidebarWidth: Double?
     @State private var globalKeyMonitor: Any?
     @State private var sidebarPage: Int = 1
+    @State private var taskFlightCoordinator = MacTaskFlightCoordinator()
+    @State private var downsyncWaveCoordinator = MacDownsyncWaveCoordinator()
     @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding")
 
     private var isDarkAppearance: Bool {
@@ -131,15 +133,45 @@ struct CraftWindowShell: View {
                 if let taskRequest = store.activeTaskEditor {
                     Color.black.opacity(0.2)
                         .ignoresSafeArea()
-                        .onTapGesture { store.activeTaskEditor = nil }
+                        .onTapGesture {
+                            taskFlightCoordinator.clearEditingState()
+                            store.activeTaskEditor = nil
+                        }
 
-                    TaskEditorPopover(store: store, request: taskRequest) {
+                    TaskEditorPopover(
+                        store: store,
+                        request: taskRequest,
+                        onCommitTaskForFlight: { committedItem, textFieldFrame, cardFrame in
+                            taskFlightCoordinator.launchSettleToRow(
+                                item: committedItem,
+                                accentColor: resolvedAccentColor,
+                                isDarkMode: isDarkAppearance,
+                                textFieldFrame: textFieldFrame,
+                                composerCardFrame: cardFrame
+                            )
+                            var noAnim = Transaction()
+                            noAnim.disablesAnimations = true
+                            withTransaction(noAnim) {
+                                store.activeTaskEditor = nil
+                            }
+                        }
+                    ) {
+                        taskFlightCoordinator.clearEditingState()
                         store.activeTaskEditor = nil
                     }
                     .offset(x: 44, y: -56)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.roweUnblur)
                 }
+
+                // Optical Metal Liquid Glass Bubble flight overlay (matching iOS behavior)
+                MacTaskBubbleFlightOverlay(coordinator: taskFlightCoordinator)
+
+                // Top-to-bottom optical downsync shockwave + gradual dim (excluding newly synced tasks)
+                MacDownsyncWaveOverlay(
+                    waveCoordinator: downsyncWaveCoordinator,
+                    flightCoordinator: taskFlightCoordinator
+                )
 
                 if store.isLoginSheetPresented {
                     Color.black.opacity(0.28)
@@ -187,8 +219,16 @@ struct CraftWindowShell: View {
                     .transition(.roweConvergeUnblur)
                 }
             }
+            .coordinateSpace(name: "macWindowSpace")
         }
         .tint(resolvedAccentColor)
+        .onChange(of: store.activeTaskEditor) { _, newReq in
+            if case .edit(let item) = newReq {
+                taskFlightCoordinator.activeEditingBlockId = item.block.id
+            } else if taskFlightCoordinator.activeFlight?.direction != .openForEdit {
+                taskFlightCoordinator.clearEditingState()
+            }
+        }
         .onChange(of: store.settings.appearanceMode) { _, mode in
             applyAppAppearance(mode)
         }
@@ -207,6 +247,15 @@ struct CraftWindowShell: View {
                 showOnboarding = !completed
             }
         }
+        .onChange(of: store.downsyncWaveId) { _, _ in
+            guard !store.settings.reduceAnimations,
+                  store.settings.crazySyncAnimation,
+                  !store.downsyncedTaskIds.isEmpty else { return }
+            downsyncWaveCoordinator.trigger(
+                taskIds: store.downsyncedTaskIds,
+                isDarkMode: isDarkAppearance
+            )
+        }
         .onAppear {
             applyAppAppearance(store.settings.appearanceMode)
             HapticsManager.shared.isEnabled = store.settings.enableHaptics
@@ -220,6 +269,8 @@ struct CraftWindowShell: View {
             }
             installGlobalShortcutMonitor()
             MacFocusTracker.shared.start(with: store)
+            MacBubbleMetalCache.shared.prewarm()
+            MacDownsyncMetalCache.shared.prewarm()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.handleAppBecameActive()
@@ -323,7 +374,11 @@ struct CraftWindowShell: View {
         case .tasks:
             AllTasksView(store: store)
         case .calendar:
-            CalendarTasksView(store: store)
+            CalendarTasksView(
+                store: store,
+                flightCoordinator: taskFlightCoordinator,
+                downsyncWaveCoordinator: downsyncWaveCoordinator
+            )
         case .connections:
             ConnectionsView(store: store)
         case .sharedWithMe:

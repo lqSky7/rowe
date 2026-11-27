@@ -131,6 +131,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
     public var enableHaptics: Bool
     public var applyDocumentStyleToApp: Bool
     public var reduceAnimations: Bool
+    public var crazyTaskComposeAnimation: Bool
+    public var crazySyncAnimation: Bool
     public var selectedAppIconIndex: Int
     public var allDocsViewStyleRaw: String
     public var allDocsSortOrderRaw: String
@@ -161,6 +163,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
         enableHaptics: Bool = true,
         applyDocumentStyleToApp: Bool = true,
         reduceAnimations: Bool = false,
+        crazyTaskComposeAnimation: Bool = true,
+        crazySyncAnimation: Bool = true,
         selectedAppIconIndex: Int = 0,
         allDocsViewStyleRaw: String = "grid",
         allDocsSortOrderRaw: String = "Updated",
@@ -187,6 +191,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
         self.enableHaptics = enableHaptics
         self.applyDocumentStyleToApp = applyDocumentStyleToApp
         self.reduceAnimations = reduceAnimations
+        self.crazyTaskComposeAnimation = crazyTaskComposeAnimation
+        self.crazySyncAnimation = crazySyncAnimation
         self.selectedAppIconIndex = selectedAppIconIndex
         self.allDocsViewStyleRaw = allDocsViewStyleRaw
         self.allDocsSortOrderRaw = allDocsSortOrderRaw
@@ -216,6 +222,8 @@ public struct AppSettings: Codable, Hashable, Sendable {
         enableHaptics = try c.decodeIfPresent(Bool.self, forKey: .enableHaptics) ?? true
         applyDocumentStyleToApp = try c.decodeIfPresent(Bool.self, forKey: .applyDocumentStyleToApp) ?? true
         reduceAnimations = try c.decodeIfPresent(Bool.self, forKey: .reduceAnimations) ?? false
+        crazyTaskComposeAnimation = try c.decodeIfPresent(Bool.self, forKey: .crazyTaskComposeAnimation) ?? true
+        crazySyncAnimation = try c.decodeIfPresent(Bool.self, forKey: .crazySyncAnimation) ?? true
         selectedAppIconIndex = try c.decodeIfPresent(Int.self, forKey: .selectedAppIconIndex) ?? 0
         allDocsViewStyleRaw = try c.decodeIfPresent(String.self, forKey: .allDocsViewStyleRaw) ?? "grid"
         allDocsSortOrderRaw = try c.decodeIfPresent(String.self, forKey: .allDocsSortOrderRaw) ?? "Updated"

@@ -390,6 +390,22 @@ struct SettingsView: View {
                         store.updateSettings { $0.reduceAnimations = val }
                     }
                 ))
+                Divider().opacity(0.25)
+                Toggle("Crazy Task Compose Animation", isOn: Binding(
+                    get: { store.settings.crazyTaskComposeAnimation },
+                    set: { val in
+                        HapticsManager.shared.toggle()
+                        store.updateSettings { $0.crazyTaskComposeAnimation = val }
+                    }
+                ))
+                Divider().opacity(0.25)
+                Toggle("Crazy Sync Animation", isOn: Binding(
+                    get: { store.settings.crazySyncAnimation },
+                    set: { val in
+                        HapticsManager.shared.toggle()
+                        store.updateSettings { $0.crazySyncAnimation = val }
+                    }
+                ))
             }
         }
 

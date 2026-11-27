@@ -1,7 +1,11 @@
 import SwiftUI
 import RoweCore
 
-/// Native adaptive Liquid Glass + GlassGlow Sign In sheet for iOS (matches app background, zero Server URL clutter).
+/// Sleek, keyboard-aware Sign In / Create Account sheet for iOS:
+/// - Compact adaptive header that gracefully tucks when the keyboard is active
+/// - Crisp elevated segmented switcher & focus-ringed inputs (zero muddy gray borders)
+/// - Primary Sign In / Create Account button pinned via `.safeAreaInset(edge: .bottom)` so it
+///   always floats cleanly above the keyboard alongside the password field.
 struct IOSLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -15,124 +19,225 @@ struct IOSLoginSheet: View {
     @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var password: String = ""
+    @State private var showPassword = false
     @FocusState private var focusedField: LoginField?
     @Namespace private var modePillNS
+
+    private var isDark: Bool { colorScheme == .dark }
+
+    private var resolvedAccent: Color {
+        Color(hex: store.settings.accentColor.resolvedHex(isDark: isDark))
+    }
+
+    private var isKeyboardActive: Bool {
+        focusedField != nil
+    }
 
     private var canSubmit: Bool {
         !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && password.count >= 8
     }
 
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-                .ignoresSafeArea()
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: isKeyboardActive ? 16 : 22) {
+                        // Adaptive hero header — stays spacious at rest and compacts smoothly while typing
+                        VStack(spacing: isKeyboardActive ? 6 : 12) {
+                            if !isKeyboardActive {
+                                RoweRibbonMark()
+                                    .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 82, height: 62)
+                                    .glassGlow(RoweOnboardingView.monochromePalette, speed: 0.72, glow: 1.0)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.88)))
+                            }
 
-            ScrollView {
-                VStack(spacing: 20) {
-                    HStack {
-                        Spacer()
-                        Button("Offline") {
-                            IOSKeyboard.dismiss()
-                            dismiss()
-                        }
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    }
+                            VStack(spacing: 4) {
+                                Text(isRegisterMode ? "Create your account" : "Welcome back")
+                                    .font(.system(size: isKeyboardActive ? 22 : 26, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.primary)
+                                    .contentTransition(.numericText())
 
-                    RoweRibbonMark()
-                        .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
-                        .foregroundStyle(.white)
-                        .frame(width: 96, height: 72)
-                        .glassGlow(RoweOnboardingView.monochromePalette, speed: 0.72, glow: 1.0)
-                        .padding(.top, 4)
-
-                    VStack(spacing: 6) {
-                        Text(isRegisterMode ? "Create your Rowe account" : "Sign in to Rowe")
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .foregroundStyle(.primary)
-                            .contentTransition(.numericText())
-                        Text("Sync documents, profile, and zero-knowledge locked notes.")
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-
-                    HStack(spacing: 4) {
-                        modeTab("Sign In", active: !isRegisterMode) {
-                            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                                isRegisterMode = false
-                                store.authErrorMessage = nil
+                                Text("Sync tasks, docs, and locked notes across devices.")
+                                    .font(.system(size: 13.5))
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
                             }
                         }
-                        modeTab("Create Account", active: isRegisterMode) {
-                            withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
-                                isRegisterMode = true
-                                store.authErrorMessage = nil
+                        .padding(.top, isKeyboardActive ? 4 : 10)
+                        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: isKeyboardActive)
+
+                        // Clean elevated pill switcher
+                        HStack(spacing: 3) {
+                            modeTab("Sign In", active: !isRegisterMode) {
+                                IOSHaptics.shared.toggle()
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                                    isRegisterMode = false
+                                    store.authErrorMessage = nil
+                                }
+                            }
+                            modeTab("Create Account", active: isRegisterMode) {
+                                IOSHaptics.shared.toggle()
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                                    isRegisterMode = true
+                                    store.authErrorMessage = nil
+                                }
                             }
                         }
-                    }
-                    .padding(4)
-                    .background(
-                        Capsule()
-                            .fill(Color.primary.opacity(0.07))
-                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75))
-                    )
+                        .padding(3.5)
+                        .background(
+                            Capsule()
+                                .fill(isDark ? Color(white: 0.13) : Color(uiColor: .secondarySystemFill))
+                        )
 
-                    VStack(spacing: 12) {
-                        if isRegisterMode {
-                            fieldRow(icon: "person") {
-                                TextField("Your name", text: $displayName)
-                                    .focused($focusedField, equals: .displayName)
+                        // Crisp modern form inputs with active focus ring
+                        VStack(spacing: 11) {
+                            if isRegisterMode {
+                                fieldRow(
+                                    icon: "person",
+                                    isFocused: focusedField == .displayName
+                                ) {
+                                    TextField("Your name", text: $displayName)
+                                        .textContentType(.name)
+                                        .focused($focusedField, equals: .displayName)
+                                        .submitLabel(.next)
+                                        .onSubmit { focusedField = .email }
+                                }
+                                .id(LoginField.displayName)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
+                            fieldRow(
+                                icon: "envelope",
+                                isFocused: focusedField == .email
+                            ) {
+                                TextField("Email address", text: $email)
+                                    .textContentType(.emailAddress)
+                                    .textInputAutocapitalization(.never)
+                                    .keyboardType(.emailAddress)
+                                    .autocorrectionDisabled()
+                                    .focused($focusedField, equals: .email)
                                     .submitLabel(.next)
-                                    .onSubmit { focusedField = .email }
+                                    .onSubmit { focusedField = .password }
                             }
+                            .id(LoginField.email)
+
+                            fieldRow(
+                                icon: "lock",
+                                isFocused: focusedField == .password
+                            ) {
+                                HStack(spacing: 8) {
+                                    Group {
+                                        if showPassword {
+                                            TextField(isRegisterMode ? "Create password (8+ chars)" : "Password", text: $password)
+                                                .textInputAutocapitalization(.never)
+                                                .autocorrectionDisabled()
+                                        } else {
+                                            SecureField(isRegisterMode ? "Create password (8+ chars)" : "Password", text: $password)
+                                        }
+                                    }
+                                    .textContentType(isRegisterMode ? .newPassword : .password)
+                                    .focused($focusedField, equals: .password)
+                                    .submitLabel(.go)
+                                    .onSubmit { if canSubmit { submit() } }
+
+                                    Button {
+                                        showPassword.toggle()
+                                    } label: {
+                                        Image(systemName: showPassword ? "eye.slash" : "eye")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 28, height: 28)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .id(LoginField.password)
                         }
 
-                        fieldRow(icon: "envelope") {
-                            TextField("Email address", text: $email)
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.emailAddress)
-                                .autocorrectionDisabled()
-                                .focused($focusedField, equals: .email)
-                                .submitLabel(.next)
-                                .onSubmit { focusedField = .password }
-                        }
-
-                        fieldRow(icon: "lock") {
-                            SecureField(isRegisterMode ? "Create password (8+ chars)" : "Password", text: $password)
-                                .focused($focusedField, equals: .password)
-                                .submitLabel(.go)
-                                .onSubmit { submit() }
-                        }
-                    }
-
-                    if let err = store.authErrorMessage, !err.isEmpty {
-                        Text(err)
-                            .font(.system(size: 13, weight: .medium))
+                        if let err = store.authErrorMessage, !err.isEmpty {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .font(.system(size: 14))
+                                Text(err)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.red.opacity(isDark ? 0.14 : 0.08))
+                            )
+                            .id("authError")
+                        }
                     }
-
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 18)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: focusedField) { _, field in
+                    guard let field else { return }
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        proxy.scrollTo(field, anchor: .center)
+                    }
+                }
+            }
+            .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
                     Button {
                         submit()
                     } label: {
                         HStack(spacing: 8) {
-                            if store.isAuthBusy { ProgressView() }
-                            Text(isRegisterMode ? "Create Account" : "Sign In")
+                            if store.isAuthBusy {
+                                ProgressView()
+                                    .tint(isDark ? .black : .white)
+                            }
+                            Text(isRegisterMode ? "Create Account" : "Continue")
                                 .font(.system(size: 16, weight: .semibold))
                         }
-                        .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
+                        .foregroundStyle(isDark ? Color.black : Color.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(Capsule().fill(Color.primary.opacity(canSubmit ? 1.0 : 0.42)))
+                        .frame(height: 52)
+                        .background(
+                            Capsule()
+                                .fill(Color.primary.opacity(canSubmit ? 1.0 : 0.28))
+                        )
                     }
                     .buttonStyle(RowePressScaleStyle())
                     .disabled(!canSubmit || store.isAuthBusy)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 10)
+                    .padding(.bottom, 12)
                 }
-                .padding(24)
+                .background(
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color(uiColor: .systemBackground).opacity(0.0), location: 0.0),
+                            .init(color: Color(uiColor: .systemBackground).opacity(0.92), location: 0.28),
+                            .init(color: Color(uiColor: .systemBackground), location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea()
+                )
             }
-            .scrollDismissesKeyboard(.interactively)
-            .onTapGesture { IOSKeyboard.dismiss() }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Offline") {
+                        IOSKeyboard.dismiss()
+                        dismiss()
+                    }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                }
+            }
             .onAppear {
                 if displayName.isEmpty && store.space.authorName != "Owner" {
                     displayName = store.space.authorName
@@ -149,39 +254,50 @@ struct IOSLoginSheet: View {
                 .font(.system(size: 13.5, weight: active ? .semibold : .medium))
                 .foregroundStyle(active ? .primary : .secondary)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .padding(.vertical, 9)
                 .background {
                     if active {
                         Capsule()
-                            .fill(Color.primary.opacity(0.13))
-                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+                            .fill(isDark ? Color(white: 0.22) : Color(uiColor: .systemBackground))
+                            .shadow(color: .black.opacity(isDark ? 0.28 : 0.08), radius: 5, y: 2)
                             .matchedGeometryEffect(id: "iosLoginPill", in: modePillNS)
                     }
                 }
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
 
-    private func fieldRow<Content: View>(icon: String, @ViewBuilder content: () -> Content) -> some View {
+    private func fieldRow<Content: View>(
+        icon: String,
+        isFocused: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 14.5, weight: .medium))
+                .foregroundStyle(isFocused ? resolvedAccent : .secondary)
                 .frame(width: 20)
             content()
-                .font(.system(size: 15))
+                .font(.system(size: 15.5))
                 .foregroundStyle(.primary)
         }
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .frame(height: 50)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(isDark ? Color(white: 0.115) : Color(uiColor: .secondarySystemGroupedBackground))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.11), lineWidth: 0.75)
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .strokeBorder(
+                            isFocused
+                                ? resolvedAccent.opacity(0.85)
+                                : (isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)),
+                            lineWidth: isFocused ? 1.4 : 0.75
+                        )
                 )
         )
+        .animation(.easeOut(duration: 0.16), value: isFocused)
     }
 
     private func submit() {

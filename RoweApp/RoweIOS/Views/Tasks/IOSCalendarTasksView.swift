@@ -20,6 +20,8 @@ struct IOSCalendarTasksView: View {
     @Bindable var store: WorkspaceStore
     let mode: IOSTaskViewMode
     let zoomNamespace: Namespace.ID
+    var flightCoordinator: IOSTaskFlightCoordinator? = nil
+    var downsyncWaveCoordinator: IOSDownsyncWaveCoordinator? = nil
     var onOpenSettings: () -> Void
     var onOpenQuickAdd: (Date?) -> Void
     var onEditTask: (ResolvedTaskItem) -> Void
@@ -76,6 +78,10 @@ struct IOSCalendarTasksView: View {
                             Toggle("Show Completed", isOn: $showCompleted)
                             Toggle("Show Previous Days", isOn: $showPreviousDays)
                             Divider()
+                            Button("Sync Now", systemImage: "arrow.triangle.2.circlepath") {
+                                IOSHaptics.shared.tap()
+                                store.triggerSyncNow()
+                            }
                             Button("Add Task", systemImage: "plus") { onOpenQuickAdd(nil) }
                         } label: {
                             Image(systemName: "ellipsis")
@@ -104,11 +110,11 @@ struct IOSCalendarTasksView: View {
             .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: reduceMotion)
             .scrollDismissesKeyboard(.interactively)
 
-            // Subtle progressive blur on top and bottom edges
+            // Clean progressive edge fade on top and bottom (zero gray haze in Dark Mode)
             VStack {
-                IOSProgressiveBlurEdge(edge: .top, height: 68)
+                IOSProgressiveBlurEdge(edge: .top, height: 56)
                 Spacer()
-                IOSProgressiveBlurEdge(edge: .bottom, height: 108)
+                IOSProgressiveBlurEdge(edge: .bottom, height: 88)
             }
             .ignoresSafeArea()
             .allowsHitTesting(false)
@@ -193,17 +199,34 @@ struct IOSCalendarTasksView: View {
                     .opacity(0.28)
             }
             .padding(.horizontal, 18)
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { frame in
+                flightCoordinator?.reportDaySectionFrame(frame, for: day)
+            }
 
             if !pendingTasks.isEmpty {
                 VStack(spacing: 2) {
                     ForEach(pendingTasks) { item in
+                        let isDownsynced = downsyncWaveCoordinator?.highlightedTaskIds.contains(item.block.id) == true
                         IOSTaskRow(store: store, item: item, onSelectTask: {
                             IOSHaptics.shared.tap()
                             onEditTask(item)
                         }) { newState in
                             handleTaskStateChange(item: item, newState: newState)
                         }
-                        .transition(.roweUnblur)
+                        .iosDownsyncTaskShimmer(
+                            isHighlighted: isDownsynced,
+                            triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
+                            isDarkMode: colorScheme == .dark
+                        )
+                        .opacity(flightCoordinator?.shouldHideRow(item.block.id) == true ? 0 : 1)
+                        .onGeometryChange(for: CGRect.self) { proxy in
+                            proxy.frame(in: .global)
+                        } action: { frame in
+                            flightCoordinator?.reportRowFrame(frame, for: item.block.id)
+                        }
+                        .transition(isDownsynced ? .opacity : .roweUnblur)
                     }
                 }
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pendingTasks.map(\.id))
@@ -282,13 +305,25 @@ struct IOSCalendarTasksView: View {
                 .padding(.top, 40)
             } else {
                 ForEach(pending) { item in
+                    let isDownsynced = downsyncWaveCoordinator?.highlightedTaskIds.contains(item.block.id) == true
                     IOSTaskRow(store: store, item: item, onSelectTask: {
                         IOSHaptics.shared.tap()
                         onEditTask(item)
                     }) { newState in
                         handleTaskStateChange(item: item, newState: newState)
                     }
-                    .transition(.roweUnblur)
+                    .iosDownsyncTaskShimmer(
+                        isHighlighted: isDownsynced,
+                        triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
+                        isDarkMode: colorScheme == .dark
+                    )
+                    .opacity(flightCoordinator?.shouldHideRow(item.block.id) == true ? 0 : 1)
+                    .onGeometryChange(for: CGRect.self) { proxy in
+                        proxy.frame(in: .global)
+                    } action: { frame in
+                        flightCoordinator?.reportRowFrame(frame, for: item.block.id)
+                    }
+                    .transition(isDownsynced ? .opacity : .roweUnblur)
                 }
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pending.map(\.id))
             }
@@ -369,35 +404,35 @@ struct IOSTaskRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(checkboxGlowColor)
-                    .frame(width: 28, height: 28)
-                    .blur(radius: 4.5)
+                    .frame(width: 24, height: 24)
+                    .blur(radius: 4)
                     .allowsHitTesting(false)
 
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
                     .fill(
                         redFlash || state == .canceled
                             ? Color.red
                             : (state == .completed ? selectedAccent : Color.clear)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        RoundedRectangle(cornerRadius: 5.5, style: .continuous)
                             .strokeBorder(
                                 redFlash || state == .canceled
                                     ? Color.red
                                     : (state == .completed ? Color.clear : Color.primary.opacity(0.35)),
-                                lineWidth: 1.5
+                                lineWidth: 1.4
                             )
                     )
                 if state == .completed && !redFlash {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 9.5, weight: .bold))
                         .foregroundStyle(.white)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 } else if state == .canceled || redFlash {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 9.5, weight: .bold))
                         .foregroundStyle(.white)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
@@ -405,8 +440,17 @@ struct IOSTaskRow: View {
             .animation(.easeOut(duration: 0.16), value: redFlash)
             .animation(.easeOut(duration: 0.16), value: accentFlash)
             .scaleEffect(popScale)
-            .frame(width: 22, height: 22)
-            .contentShape(Rectangle().inset(by: -10))
+            .frame(width: 19, height: 19)
+            // Generous tap padding above/below/left, but tight 3pt trailing margin so tapping near text never triggers completion
+            .padding(.top, 9)
+            .padding(.bottom, 9)
+            .padding(.leading, 9)
+            .padding(.trailing, 3)
+            .contentShape(Rectangle())
+            .padding(.top, -9)
+            .padding(.bottom, -9)
+            .padding(.leading, -9)
+            .padding(.trailing, -3)
             .onTapGesture {
                 let now = Date()
                 if now.timeIntervalSince(lastTapDate) < 0.34 {
@@ -580,10 +624,24 @@ struct IOSTaskRow: View {
 /// 1. Schedule date: Today, Tomorrow, or Open Calendar (inline graphical calendar)
 /// 2. Cycling conversational prompt ("What dya wanna do today?")
 /// 3. Repeat: Daily, Weekly, Monthly + Paste/Attach Photos (matching Mac)
+private struct OptionalComposerGlassModifier: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled {
+            content.roweIOSGlassRoundedRect(radius: 24, interactive: false)
+        } else {
+            content
+        }
+    }
+}
+
 struct IOSQuickAddTaskCard: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @Bindable var store: WorkspaceStore
     let editingItem: ResolvedTaskItem?
+    var embedGlassBackground: Bool = true
+    var immediateFocus: Bool = false
+    var onCreatedTaskForFlight: ((ResolvedTaskItem, CGRect, CGRect) -> Void)? = nil
     var onClose: () -> Void
 
     private static let prompts: [String] = [
@@ -604,6 +662,8 @@ struct IOSQuickAddTaskCard: View {
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var previewImageIndex: Int? = nil
     @State private var didCopyPreviewImage: Bool = false
+    @State private var cardFrame: CGRect = .zero
+    @State private var textFieldFrame: CGRect = .zero
     @State private var promptPlaceholder: String
     @State private var undoStack: [String] = []
     @State private var redoStack: [String] = []
@@ -614,10 +674,16 @@ struct IOSQuickAddTaskCard: View {
         store: WorkspaceStore,
         initialDate: Date = Calendar.current.startOfDay(for: Date()),
         editingItem: ResolvedTaskItem? = nil,
+        embedGlassBackground: Bool = true,
+        immediateFocus: Bool = false,
+        onCreatedTaskForFlight: ((ResolvedTaskItem, CGRect, CGRect) -> Void)? = nil,
         onClose: @escaping () -> Void
     ) {
         self.store = store
         self.editingItem = editingItem
+        self.embedGlassBackground = embedGlassBackground
+        self.immediateFocus = immediateFocus
+        self.onCreatedTaskForFlight = onCreatedTaskForFlight
         self.onClose = onClose
         let idx = Self.promptCursor % Self.prompts.count
         Self.promptCursor += 1
@@ -745,6 +811,11 @@ struct IOSQuickAddTaskCard: View {
                 .lineLimit(1...4)
                 .submitLabel(.done)
                 .onSubmit { saveAndClose() }
+                .onGeometryChange(for: CGRect.self) { proxy in
+                    proxy.frame(in: .global)
+                } action: { frame in
+                    textFieldFrame = frame
+                }
                 .onChange(of: text) { oldValue, newValue in
                     guard !isApplyingHistory, oldValue != newValue else { return }
                     undoStack.append(oldValue)
@@ -759,8 +830,12 @@ struct IOSQuickAddTaskCard: View {
             composerToolbar
         }
         .padding(18)
-        .roweIOSGlassRoundedRect(radius: 24, interactive: true)
-        .iosDragToDismiss(onDismiss: onClose)
+        .modifier(OptionalComposerGlassModifier(enabled: embedGlassBackground))
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .global)
+        } action: { frame in
+            cardFrame = frame
+        }
         .photosPicker(isPresented: $showPhotosPicker, selection: $selectedPhotoItem, matching: .images)
         .sheet(isPresented: Binding(
             get: { previewImageIndex != nil },
@@ -787,7 +862,15 @@ struct IOSQuickAddTaskCard: View {
             }
         }
         .onAppear {
-            isFocused = true
+            if immediateFocus {
+                // Pre-trigger keyboard immediately during reverse bubble-to-composer edit flight
+                isFocused = true
+            } else {
+                // Give iOS 26's native GlassEffectContainer morph ~240ms to expand before the keyboard rises
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+                    isFocused = true
+                }
+            }
         }
     }
 
@@ -1069,7 +1152,6 @@ struct IOSQuickAddTaskCard: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachedImagesBase64.isEmpty else { return }
         let finalTitle = trimmed.isEmpty ? "Image Task" : trimmed
-        IOSHaptics.shared.taskComplete()
 
         if let item = editingItem {
             store.updateBlock(in: item.documentId, blockId: item.block.id) { block in
@@ -1080,14 +1162,40 @@ struct IOSQuickAddTaskCard: View {
                 meta.attachedImagesBase64 = attachedImagesBase64
                 block.task = meta
             }
+            if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation, let onCreatedTaskForFlight {
+                var updatedBlock = item.block
+                updatedBlock.content = finalTitle
+                var meta = updatedBlock.task ?? TaskMetadata(isInbox: item.isInbox)
+                meta.scheduleDate = scheduleDate
+                meta.repeatRule = repeatRule
+                meta.attachedImagesBase64 = attachedImagesBase64
+                updatedBlock.task = meta
+                let updatedItem = ResolvedTaskItem(
+                    block: updatedBlock,
+                    documentId: item.documentId,
+                    documentTitle: item.documentTitle,
+                    isInbox: item.isInbox
+                )
+                IOSHaptics.shared.tap()
+                onCreatedTaskForFlight(updatedItem, textFieldFrame, cardFrame)
+            } else {
+                IOSHaptics.shared.taskComplete()
+                onClose()
+            }
         } else {
-            _ = store.addInboxTask(
+            let created = store.addInboxTask(
                 title: finalTitle,
                 scheduleDate: scheduleDate,
                 repeatRule: repeatRule,
                 attachedImagesBase64: attachedImagesBase64
             )
+            if !store.settings.reduceAnimations && store.settings.crazyTaskComposeAnimation, let onCreatedTaskForFlight {
+                IOSHaptics.shared.tap()
+                onCreatedTaskForFlight(created, textFieldFrame, cardFrame)
+            } else {
+                IOSHaptics.shared.taskComplete()
+                onClose()
+            }
         }
-        onClose()
     }
 }

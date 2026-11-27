@@ -20,6 +20,8 @@ targets:
       - path: Views
       - path: ../RoweShared
       - path: Resources/Shaders/GlassGlow.metal
+      - path: Resources/Shaders/TaskBubbleLens.metal
+      - path: Resources/Shaders/DownsyncWave.metal
       - path: Resources/Assets.xcassets
       - path: Resources/Wallpapers
         buildPhase: resources

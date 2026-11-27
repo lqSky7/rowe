@@ -1,0 +1,46 @@
+name: RoweIOS-Dev
+options:
+  postGenCommand: "python3 scripts/fix-local-package-backlinks.py"
+  bundleIdPrefix: com.rowe
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  RoweCore:
+    path: ../RoweCore
+targets:
+  RoweIOSDev:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: App
+      - path: DesignSystem
+      - path: LiveActivity
+      - path: Services
+      - path: Views
+      - path: ../RoweShared
+      - path: Resources/Shaders/GlassGlow.metal
+      - path: Resources/Shaders/TaskBubbleLens.metal
+      - path: Resources/Shaders/DownsyncWave.metal
+      - path: Resources/Assets.xcassets
+      - path: Resources/Wallpapers
+        buildPhase: resources
+        type: folder
+    settings:
+      base:
+        INFOPLIST_FILE: Info-Dev.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.rowe.ios.dev
+        PRODUCT_NAME: RoweDev
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIconDev
+    dependencies:
+      - package: RoweCore
+      - sdk: ActivityKit.framework
+      - sdk: FamilyControls.framework
+      - sdk: DeviceActivity.framework
+      - sdk: ManagedSettings.framework
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: CryptoKit.framework

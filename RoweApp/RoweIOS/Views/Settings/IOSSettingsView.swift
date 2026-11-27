@@ -349,6 +349,29 @@ private struct IOSAppearanceSettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
+                    Text("Animations").font(.system(size: 16, weight: .bold))
+                    VStack(spacing: 12) {
+                        Toggle("Crazy Task Compose Animation", isOn: Binding(
+                            get: { store.settings.crazyTaskComposeAnimation },
+                            set: { val in
+                                IOSHaptics.shared.toggle()
+                                store.updateSettings { $0.crazyTaskComposeAnimation = val }
+                            }
+                        ))
+                        Divider().opacity(0.25)
+                        Toggle("Crazy Sync Animation", isOn: Binding(
+                            get: { store.settings.crazySyncAnimation },
+                            set: { val in
+                                IOSHaptics.shared.toggle()
+                                store.updateSettings { $0.crazySyncAnimation = val }
+                            }
+                        ))
+                    }
+                    .padding(16)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.primary.opacity(0.07)))
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Application Icon").font(.system(size: 16, weight: .bold))
                     Text("Choose between Light and Dark home screen icons.")
                         .font(.system(size: 13)).foregroundStyle(.secondary)

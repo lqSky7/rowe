@@ -41,6 +41,37 @@ extension View {
     func roweIOSGlassRoundedRect(radius: CGFloat = 16, interactive: Bool = true) -> some View {
         roweIOSGlass(in: RoundedRectangle(cornerRadius: radius, style: .continuous), interactive: interactive)
     }
+
+    @ViewBuilder
+    func roweIOSGlassMorphID(_ id: String, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffectID(id, in: namespace)
+        } else {
+            self.matchedGeometryEffect(id: id, in: namespace)
+        }
+    }
+}
+
+/// Wraps morphing Liquid Glass siblings in iOS 26's native `GlassEffectContainer` so
+/// controls like '+' -> Task Composer morph using Apple's official Liquid Glass transition.
+struct IOSGlassMorphContainer<Content: View>: View {
+    let spacing: CGFloat
+    let content: Content
+
+    init(spacing: CGFloat = 24, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
+        }
+    }
 }
 
 struct IOSGlassCircleButton: View {
@@ -95,18 +126,13 @@ struct IOSGlassPillButton: View {
     }
 }
 
-/// Space avatar supporting custom base64 photo or clean initials badge,
-/// with a directional blurred-PFP-color sync glow (in -> out when sent, out -> in when received).
+/// Space avatar supporting custom base64 photo or clean initials badge.
 struct IOSSpaceAvatar: View {
     let space: Space
     var size: CGFloat = 36
     var cornerRadius: CGFloat = 10
     var syncPulseId: UUID? = nil
     var syncPulseDirection: SyncPulseDirection? = nil
-
-    @State private var glowScale: CGFloat = 1.0
-    @State private var glowOpacity: Double = 0.0
-    @State private var glowTask: Task<Void, Never>?
 
     @ViewBuilder
     private var avatarContent: some View {
@@ -131,74 +157,14 @@ struct IOSSpaceAvatar: View {
     }
 
     var body: some View {
-        ZStack {
-            // Smooth radial feathered halo — never clips to a harsh blurred square
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color.accentColor.opacity(0.42), Color.accentColor.opacity(0.12), .clear],
-                        center: .center,
-                        startRadius: size * 0.28,
-                        endRadius: size * 0.72
-                    )
-                )
-                .frame(width: size * 1.55, height: size * 1.55)
-                .scaleEffect(glowScale)
-                .opacity(glowOpacity)
-                .allowsHitTesting(false)
-
-            avatarContent
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(
-                            glowOpacity > 0.05 ? Color.accentColor.opacity(0.55) : Color.primary.opacity(0.14),
-                            lineWidth: glowOpacity > 0.05 ? 1.25 : 0.75
-                        )
-                )
-        }
-        .frame(width: size, height: size)
-        .onChange(of: syncPulseId) { _, _ in
-            guard let dir = syncPulseDirection else { return }
-            triggerGlow(direction: dir)
-        }
-    }
-
-    private func triggerGlow(direction: SyncPulseDirection) {
-        glowTask?.cancel()
-        switch direction {
-        case .sent:
-            glowScale = 0.92
-            glowOpacity = 0.0
-            withAnimation(.easeOut(duration: 0.25)) {
-                glowScale = 1.08
-                glowOpacity = 0.75
-            }
-            glowTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeInOut(duration: 0.55)) {
-                    glowScale = 1.22
-                    glowOpacity = 0.0
-                }
-            }
-        case .received:
-            glowScale = 1.20
-            glowOpacity = 0.0
-            withAnimation(.easeOut(duration: 0.30)) {
-                glowScale = 1.04
-                glowOpacity = 0.72
-            }
-            glowTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeInOut(duration: 0.52)) {
-                    glowScale = 0.94
-                    glowOpacity = 0.0
-                }
-            }
-        }
+        avatarContent
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
+            )
+            .frame(width: size, height: size)
     }
 }
 
@@ -413,34 +379,50 @@ extension View {
     }
 }
 
-/// Smooth progressive blur fade for top & bottom edges of scrollable iOS views.
+/// Smooth progressive edge fade for top & bottom of scrollable iOS views.
+/// Avoids milky `.ultraThinMaterial` haze on pure-black Dark Mode backgrounds.
 struct IOSProgressiveBlurEdge: View {
     enum Edge { case top, bottom }
+    @Environment(\.colorScheme) private var colorScheme
     let edge: Edge
-    var height: CGFloat = 84
+    var height: CGFloat = 72
+
+    private var fadeGradient: LinearGradient {
+        let bg = Color(uiColor: .systemBackground)
+        let stops: [Gradient.Stop] = edge == .top
+            ? [
+                .init(color: bg.opacity(0.95), location: 0.0),
+                .init(color: bg.opacity(0.68), location: 0.38),
+                .init(color: bg.opacity(0.22), location: 0.72),
+                .init(color: bg.opacity(0.0), location: 1.0)
+            ]
+            : [
+                .init(color: bg.opacity(0.0), location: 0.0),
+                .init(color: bg.opacity(0.22), location: 0.28),
+                .init(color: bg.opacity(0.68), location: 0.62),
+                .init(color: bg.opacity(0.95), location: 1.0)
+            ]
+        return LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
+    }
 
     var body: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-            .mask(
-                LinearGradient(
-                    stops: edge == .top
-                        ? [.init(color: .black, location: 0.0), .init(color: .black.opacity(0.65), location: 0.48), .init(color: .clear, location: 1.0)]
-                        : [.init(color: .clear, location: 0.0), .init(color: .black.opacity(0.65), location: 0.52), .init(color: .black, location: 1.0)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .overlay(
-                LinearGradient(
-                    colors: edge == .top
-                        ? [Color(uiColor: .systemBackground).opacity(0.52), .clear]
-                        : [.clear, Color(uiColor: .systemBackground).opacity(0.62)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .frame(height: height)
-            .allowsHitTesting(false)
+        ZStack {
+            if colorScheme == .light {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .mask(
+                        LinearGradient(
+                            stops: edge == .top
+                                ? [.init(color: .black, location: 0.0), .init(color: .black.opacity(0.45), location: 0.55), .init(color: .clear, location: 1.0)]
+                                : [.init(color: .clear, location: 0.0), .init(color: .black.opacity(0.45), location: 0.45), .init(color: .black, location: 1.0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            }
+            fadeGradient
+        }
+        .frame(height: height)
+        .allowsHitTesting(false)
     }
 }

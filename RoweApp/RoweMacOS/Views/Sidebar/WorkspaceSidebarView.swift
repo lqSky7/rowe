@@ -7,9 +7,6 @@ struct WorkspaceSidebarView: View {
     @State private var isCreatingFolder = false
     @State private var newFolderName = ""
     @State private var isImportingMarkdown = false
-    @State private var glowScale: CGFloat = 1.0
-    @State private var glowOpacity: Double = 0.0
-    @State private var syncGlowTask: Task<Void, Never>?
 
     private var starredSection: SidebarSectionState {
         store.sidebarSections.first(where: { $0.type == .starred }) ?? SidebarSectionState(type: .starred)
@@ -238,25 +235,14 @@ struct WorkspaceSidebarView: View {
 
     private var spaceHeader: some View {
         HStack(spacing: 9) {
-            ZStack {
-                sidebarAvatarGraphic
-                    .frame(width: 26, height: 26)
-                    .clipShape(Circle())
-                    .saturation(1.45)
-                    .blur(radius: 7)
-                    .scaleEffect(glowScale)
-                    .opacity(glowOpacity)
-                    .allowsHitTesting(false)
-
-                sidebarAvatarGraphic
-                    .frame(width: 24, height: 24)
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
-                    )
-            }
-            .frame(width: 26, height: 26)
+            sidebarAvatarGraphic
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.75)
+                )
+                .frame(width: 26, height: 26)
 
             Text(store.space.name)
                 .font(.system(size: 13.5, weight: .semibold))
@@ -275,10 +261,6 @@ struct WorkspaceSidebarView: View {
                     store.isLoginSheetPresented = true
                 }
             }
-        }
-        .onChange(of: store.syncPulseId) { _, _ in
-            guard let dir = store.syncPulseDirection else { return }
-            triggerAvatarSyncGlow(direction: dir)
         }
     }
 
@@ -448,33 +430,5 @@ struct WorkspaceSidebarView: View {
         }
     }
 
-    private func triggerAvatarSyncGlow(direction: SyncPulseDirection) {
-        syncGlowTask?.cancel()
-        switch direction {
-        case .sent:
-            // Minimal in -> out blurred PFP aura
-            glowScale = 0.96
-            glowOpacity = 0.52
-            withAnimation(.easeOut(duration: 0.72)) {
-                glowScale = 1.32
-                glowOpacity = 0.0
-            }
-        case .received:
-            // Minimal out -> in blurred PFP aura
-            glowScale = 1.34
-            glowOpacity = 0.0
-            withAnimation(.easeOut(duration: 0.34)) {
-                glowScale = 1.06
-                glowOpacity = 0.50
-            }
-            syncGlowTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 340_000_000)
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeIn(duration: 0.38)) {
-                    glowScale = 0.96
-                    glowOpacity = 0.0
-                }
-            }
-        }
-    }
+
 }

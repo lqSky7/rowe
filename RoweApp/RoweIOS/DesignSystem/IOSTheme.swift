@@ -1,3 +1,4 @@
+import CoreHaptics
 import SwiftUI
 import UIKit
 import RoweCore
@@ -175,7 +176,7 @@ enum IOSKeyboard {
     }
 }
 
-/// Centralized UIKit haptic feedback engine respecting `store.settings.enableHaptics`.
+/// Centralized UIKit + CoreHaptics feedback engine respecting `store.settings.enableHaptics`.
 @MainActor
 final class IOSHaptics {
     static let shared = IOSHaptics()
@@ -186,6 +187,54 @@ final class IOSHaptics {
     private let rigid = UIImpactFeedbackGenerator(style: .rigid)
     private let selectionGen = UISelectionFeedbackGenerator()
     private let notif = UINotificationFeedbackGenerator()
+
+    private var hapticEngine: CHHapticEngine?
+    private var activePlayer: CHHapticPatternPlayer?
+
+    private func ensureEngine() -> CHHapticEngine? {
+        guard isEnabled, CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return nil }
+        if let engine = hapticEngine {
+            try? engine.start()
+            return engine
+        }
+        do {
+            let engine = try CHHapticEngine()
+            engine.playsHapticsOnly = true
+            engine.resetHandler = { [weak self] in
+                Task { @MainActor in
+                    try? self?.hapticEngine?.start()
+                }
+            }
+            engine.stoppedHandler = { [weak self] _ in
+                Task { @MainActor in
+                    self?.activePlayer = nil
+                }
+            }
+            try engine.start()
+            self.hapticEngine = engine
+            return engine
+        } catch {
+            return nil
+        }
+    }
+
+    private func playPattern(events: [CHHapticEvent], curves: [CHHapticParameterCurve] = []) {
+        guard let engine = ensureEngine() else { return }
+        try? activePlayer?.stop(atTime: CHHapticTimeImmediate)
+        do {
+            let pattern = try CHHapticPattern(events: events, parameterCurves: curves)
+            let player = try engine.makePlayer(with: pattern)
+            activePlayer = player
+            try player.start(atTime: CHHapticTimeImmediate)
+        } catch {
+            // Silently ignore transient audio/haptic session interruptions
+        }
+    }
+
+    func stopContinuousHaptics() {
+        try? activePlayer?.stop(atTime: CHHapticTimeImmediate)
+        activePlayer = nil
+    }
 
     func tap() {
         guard isEnabled else { return }
@@ -215,6 +264,219 @@ final class IOSHaptics {
     func destructive() {
         guard isEnabled else { return }
         rigid.impactOccurred(intensity: 0.9)
+    }
+
+    /// Custom CoreHaptics choreography for Forward flight (Composer -> Liquid Glass Bubble -> 19x19 Checkbox + 0.5s Shimmer):
+    /// 0.00s soft gather -> 0.14s elastic detach -> 0.14-0.66s ultra-dim silky glide hum ->
+    /// 0.72s crisp spring-snap into checkbox (+ 0.78s micro-rebound) -> 0.80-1.18s faint glassy shimmer tail.
+    func playBubbleSettleHaptic() {
+        guard isEnabled else { return }
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            snap()
+            return
+        }
+        let events: [CHHapticEvent] = [
+            // 1. Composer begins condensing
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.30),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.26)
+                ],
+                relativeTime: 0.0
+            ),
+            // 2. Bubble finishes condensing & detaches
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.42),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.36)
+                ],
+                relativeTime: 0.14
+            ),
+            // 3. Continuous very-dim silky hum while the bubble glides through the air
+            CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.15),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.16)
+                ],
+                relativeTime: 0.11,
+                duration: 0.43
+            ),
+            // 4. Crisp spring-snap right as the bubble condenses into the 19x19 checkbox
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.78),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.70)
+                ],
+                relativeTime: 0.56
+            ),
+            // 5. Subtle spring-settle rebound micro-tick
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.26),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.54)
+                ],
+                relativeTime: 0.61
+            )
+        ]
+        let curves: [CHHapticParameterCurve] = [
+            CHHapticParameterCurve(
+                parameterID: .hapticIntensityControl,
+                controlPoints: [
+                    .init(relativeTime: 0.11, value: 0.65),
+                    .init(relativeTime: 0.30, value: 1.0),
+                    .init(relativeTime: 0.53, value: 0.45)
+                ],
+                relativeTime: 0.0
+            )
+        ]
+        playPattern(events: events, curves: curves)
+    }
+
+    /// Custom CoreHaptics choreography for Reverse edit flight (Row -> Checkbox Un-Bubbles & Scoops Text -> Composer):
+    /// 0.00s glassy release pop -> 0.05-0.41s ultra-dim glide hum -> 0.46s warm cushioned composer landing.
+    func playBubbleOpenForEditHaptic() {
+        guard isEnabled else { return }
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            tap()
+            return
+        }
+        let events: [CHHapticEvent] = [
+            // 1. Checkbox un-bubbles & scoops the task
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.54),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.64)
+                ],
+                relativeTime: 0.0
+            ),
+            // 2. Ultra-dim continuous liquid glide as the bubble travels outward
+            CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.15),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.20)
+                ],
+                relativeTime: 0.05,
+                duration: 0.36
+            ),
+            // 3. Soft cushioned open as the bubble flattens into the Task Composer card
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.44),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.24)
+                ],
+                relativeTime: 0.46
+            )
+        ]
+        let curves: [CHHapticParameterCurve] = [
+            CHHapticParameterCurve(
+                parameterID: .hapticIntensityControl,
+                controlPoints: [
+                    .init(relativeTime: 0.05, value: 0.65),
+                    .init(relativeTime: 0.24, value: 1.0),
+                    .init(relativeTime: 0.41, value: 0.40)
+                ],
+                relativeTime: 0.0
+            )
+        ]
+        playPattern(events: events, curves: curves)
+    }
+
+    /// Subtle liquid bloom / tuck haptic for the '+' button <-> Task Composer morph.
+    func playComposerMorphHaptic(expanding: Bool) {
+        guard isEnabled else { return }
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            tap()
+            return
+        }
+        let events: [CHHapticEvent] = expanding
+            ? [
+                CHHapticEvent(
+                    eventType: .hapticContinuous,
+                    parameters: [
+                        CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.13),
+                        CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.22)
+                    ],
+                    relativeTime: 0.0,
+                    duration: 0.18
+                ),
+                CHHapticEvent(
+                    eventType: .hapticTransient,
+                    parameters: [
+                        CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.34),
+                        CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.30)
+                    ],
+                    relativeTime: 0.18
+                )
+            ]
+            : [
+                CHHapticEvent(
+                    eventType: .hapticTransient,
+                    parameters: [
+                        CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.28),
+                        CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.38)
+                    ],
+                    relativeTime: 0.0
+                )
+            ]
+        playPattern(events: events)
+    }
+
+    /// Spatial top-to-bottom downsync wave haptic: soft luminous swell tapering smoothly as the wave sweeps down,
+    /// followed by a delicate glassy tick as newly synced tasks shimmer into place.
+    func playDownsyncWaveHaptic() {
+        guard isEnabled else { return }
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            snap()
+            return
+        }
+        let events: [CHHapticEvent] = [
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.36),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.28)
+                ],
+                relativeTime: 0.0
+            ),
+            CHHapticEvent(
+                eventType: .hapticContinuous,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.34),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.22)
+                ],
+                relativeTime: 0.02,
+                duration: 0.88
+            ),
+            CHHapticEvent(
+                eventType: .hapticTransient,
+                parameters: [
+                    CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.42),
+                    CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.62)
+                ],
+                relativeTime: 0.34
+            )
+        ]
+        let curves: [CHHapticParameterCurve] = [
+            CHHapticParameterCurve(
+                parameterID: .hapticIntensityControl,
+                controlPoints: [
+                    .init(relativeTime: 0.02, value: 0.45),
+                    .init(relativeTime: 0.22, value: 1.0),
+                    .init(relativeTime: 0.62, value: 0.55),
+                    .init(relativeTime: 0.90, value: 0.05)
+                ],
+                relativeTime: 0.0
+            )
+        ]
+        playPattern(events: events, curves: curves)
     }
 }
 

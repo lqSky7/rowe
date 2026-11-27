@@ -4,6 +4,8 @@ import RoweCore
 struct CalendarTasksView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
+    var flightCoordinator: MacTaskFlightCoordinator? = nil
+    var downsyncWaveCoordinator: MacDownsyncWaveCoordinator? = nil
     @State private var showTasks = true
     @State private var showEvents = false
     @State private var showPreviousDays = false
@@ -137,13 +139,16 @@ struct CalendarTasksView: View {
 
     private func dayCard(for day: Date, tasks: [ResolvedTaskItem]) -> some View {
         let isToday = calendar.isDateInToday(day)
-        let pendingTasks = tasks.filter {
-            ($0.block.task?.state ?? .pending) == .pending || lingeringTaskIds.contains($0.block.id)
-        }
-        let finishedTasks = tasks.filter {
-            ($0.block.task?.state ?? .pending) != .pending && !lingeringTaskIds.contains($0.block.id)
-        }
         let showCompleted = expandedCompletedDays.contains(day)
+        var seenIds: Set<String> = []
+        let uniqueTasks = tasks.filter { seenIds.insert($0.block.id).inserted }
+        let pendingTasks = uniqueTasks.filter {
+            ($0.block.task?.state ?? .pending) == .pending || (!showCompleted && lingeringTaskIds.contains($0.block.id))
+        }
+        let pendingIdSet = Set(pendingTasks.map(\.block.id))
+        let finishedTasks = uniqueTasks.filter {
+            ($0.block.task?.state ?? .pending) != .pending && !pendingIdSet.contains($0.block.id)
+        }
         let isDayDropTarget = dropTargetedDay == day
 
         return HStack(alignment: .top, spacing: 18) {
@@ -172,8 +177,10 @@ struct CalendarTasksView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if showTasks {
                     ForEach(pendingTasks) { item in
-                        calendarTaskRow(item, day: day)
-                            .transition(.roweUnblur)
+                        let isDownsynced = downsyncWaveCoordinator?.highlightedTaskIds.contains(item.block.id) == true
+                        calendarTaskRow(item, day: day, isDownsynced: isDownsynced)
+                            .id("pending-\(item.block.id)")
+                            .transition(isDownsynced ? .opacity : .roweUnblur)
                     }
 
                     if (pendingTasks.isEmpty && !finishedTasks.isEmpty) || showCompleted {
@@ -201,6 +208,7 @@ struct CalendarTasksView: View {
                         if showCompleted {
                             ForEach(finishedTasks) { item in
                                 calendarTaskRow(item, day: day)
+                                    .id("done-\(item.block.id)")
                                     .transition(.roweUnblur)
                             }
                         }
@@ -235,6 +243,11 @@ struct CalendarTasksView: View {
                 .shadow(color: isToday ? .black.opacity(0.07) : .clear, radius: 18, y: 6)
         )
         .animation(CraftTheme.hoverEase(reduceMotion: reduceMotion), value: isDayDropTarget)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named("macWindowSpace"))
+        } action: { frame in
+            flightCoordinator?.reportDaySectionFrame(frame, for: day)
+        }
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, raw.hasPrefix("task:") else { return false }
             let blockId = String(raw.dropFirst("task:".count))
@@ -280,7 +293,7 @@ struct CalendarTasksView: View {
         }
     }
 
-    private func calendarTaskRow(_ item: ResolvedTaskItem, day: Date) -> some View {
+    private func calendarTaskRow(_ item: ResolvedTaskItem, day: Date, isDownsynced: Bool = false) -> some View {
         let state = item.block.task?.state ?? .pending
         let isDone = state != .pending
         let images = item.block.task?.attachedImagesBase64 ?? []
@@ -300,67 +313,97 @@ struct CalendarTasksView: View {
                     handleTaskStateChange(item: item, newState: newState, day: day)
                 }
 
-                AnimatedStrikethroughText(
-                    item.block.content,
-                    isStruck: isDone && store.settings.completedTaskStyle == .strikethrough,
-                    font: .system(size: 13.5, weight: .medium),
-                    lineLimit: 2,
-                    reduceMotion: reduceMotion
-                )
-                .onTapGesture {
-                    HapticsManager.shared.tap()
-                    withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
-                        store.activeTaskEditor = .edit(item)
+                // Keep .draggable strictly on the title/badges area so micro-movements while clicking
+                // TaskCheckboxControl never get swallowed as cancelled drags.
+                HStack(spacing: 8) {
+                    AnimatedStrikethroughText(
+                        item.block.content,
+                        isStruck: isDone && store.settings.completedTaskStyle == .strikethrough,
+                        font: .system(size: 13.5, weight: .medium),
+                        lineLimit: 2,
+                        reduceMotion: reduceMotion
+                    )
+                    .onTapGesture {
+                        HapticsManager.shared.tap()
+                        if !reduceMotion && store.settings.crazyTaskComposeAnimation, let fc = flightCoordinator {
+                            fc.launchOpenForEdit(
+                                item: item,
+                                accentColor: selectedAccent,
+                                isDarkMode: colorScheme == .dark
+                            ) {
+                                var noAnim = Transaction()
+                                noAnim.disablesAnimations = true
+                                withTransaction(noAnim) {
+                                    store.activeTaskEditor = .edit(item)
+                                }
+                            }
+                        } else {
+                            withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
+                                store.activeTaskEditor = .edit(item)
+                            }
+                        }
                     }
-                }
 
-                ForEach(Array(images.enumerated()), id: \.offset) { idx, b64 in
-                    TaskImageChip(index: idx + 1, base64: b64)
-                }
+                    ForEach(Array(images.enumerated()), id: \.offset) { idx, b64 in
+                        TaskImageChip(index: idx + 1, base64: b64)
+                    }
 
-                if !(item.block.task?.notes.isEmpty ?? true) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
-                }
+                    if !(item.block.task?.notes.isEmpty ?? true) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.tertiary)
+                    }
 
-                Text(item.isInbox ? "Inbox" : item.documentTitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.primary.opacity(0.05)))
-
-                if item.block.task?.reminderDate != nil {
-                    Image(systemName: "alarm")
+                    Text(item.isInbox ? "Inbox" : item.documentTitle)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.primary.opacity(0.05)))
 
-                if item.block.task?.repeatRule != nil {
-                    Image(systemName: "repeat")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
+                    if item.block.task?.reminderDate != nil {
+                        Image(systemName: "alarm")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
 
-                Spacer(minLength: 0)
+                    if item.block.task?.repeatRule != nil {
+                        Image(systemName: "repeat")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+                .draggable("task:\(item.block.id)") {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.square")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Text(item.block.content.isEmpty ? "Task" : String(item.block.content.prefix(36)))
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                }
             }
         }
         .padding(.vertical, 2)
-        .contentShape(Rectangle())
-        .draggable("task:\(item.block.id)") {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.square")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Text(item.block.content.isEmpty ? "Task" : String(item.block.content.prefix(36)))
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.ultraThinMaterial, in: Capsule())
+        .macDownsyncTaskShimmer(
+            isHighlighted: isDownsynced,
+            triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
+            isDarkMode: colorScheme == .dark
+        )
+        .opacity(flightCoordinator?.shouldHideRow(item.block.id) == true ? 0 : 1)
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named("macWindowSpace"))
+        } action: { frame in
+            flightCoordinator?.reportRowFrame(frame, for: item.block.id)
         }
+        .contentShape(Rectangle())
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, raw.hasPrefix("task:") else { return false }
             let sourceId = String(raw.dropFirst("task:".count))
