@@ -18,6 +18,15 @@
       "category": "productivity",
       "versions": [
         {
+          "version": "1.0.8",
+          "buildVersion": "9",
+          "date": "2026-11-27",
+          "localizedDescription": "Version 1.0.8. Native Screen Time focus, Live Activities, refined task composer, and cross-device sync improvements.",
+          "downloadURL": "https://github.com/lqSky7/rowe/releases/download/ios-v1.0.8/Rowe-1.0.8.ipa",
+          "size": 6351450,
+          "minOSVersion": "18.0"
+        },
+        {
           "version": "1.0.7",
           "buildVersion": "8",
           "date": "2026-11-26",
