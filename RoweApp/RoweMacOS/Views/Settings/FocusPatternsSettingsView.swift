@@ -1,14 +1,17 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import RoweCore
 
 /// Non-AI-slop, Apple-native editorial Settings view for Rowe's Adaptive Focus & Behavioral Nudge system.
-/// Monochrome surfaces + user's single pastel accent, crisp tabular figures, zero blocking, zero guilt UI.
+/// Reuses onboarding GlassGlow Focus artwork, uses a visual Site & App Selector (no raw typing),
+/// and opens System Settings directly for macOS Accessibility permission.
 struct FocusPatternsSettingsView: View {
     @Bindable var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var newAllowDomain: String = ""
-    @State private var newCustomTarget: String = ""
+    @State private var showAllowlistSelector = false
+    private let tracker = MacFocusTracker.shared
 
     private var accent: Color { Color(hex: store.settings.accentColor.hex) }
 
@@ -55,7 +58,7 @@ struct FocusPatternsSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 22) {
             headerSection
             circadianRhythmCard
             observedTargetsCard
@@ -63,46 +66,56 @@ struct FocusPatternsSettingsView: View {
             allowlistCard
             permissionsAndPrivacyFooter
         }
+        .onAppear {
+            tracker.refreshAccessibilityStatus()
+        }
+        .sheet(isPresented: $showAllowlistSelector) {
+            MacAllowlistSelectorSheet(store: store)
+        }
     }
 
-    // MARK: - 1. Header & Master Toggle
+    // MARK: - 1. Header with Reused Onboarding GlassGlow Artwork & Master Toggle
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Focus Patterns")
-                        .font(.system(size: 22, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.primary)
+            surfaceCard {
+                HStack(spacing: 16) {
+                    RoweGlassGlowArtworkView(kind: .focusPermissions, size: 62, speed: 0.72, glow: 1.05)
 
-                    Text("Observes your scroll rhythm across Mac and iPhone, suggesting a quick task before long sessions — never blocking apps.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Focus Patterns")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.primary)
 
-                Spacer(minLength: 16)
-
-                Button {
-                    let preview = store.makePreviewFocusSuggestion()
-                    FocusNudgeHUDController.shared.show(suggestion: preview, store: store, isPreview: true)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 11, weight: .medium))
-                        Text("Preview Nudge")
-                            .font(.system(size: 12, weight: .medium))
+                        Text("Observes your scroll rhythm across Mac and iPhone, suggesting a quick task before long sessions — never blocking apps.")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(
-                        Capsule()
-                            .fill(Color.primary.opacity(0.07))
-                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75))
-                    )
+
+                    Spacer(minLength: 12)
+
+                    Button {
+                        let preview = store.makePreviewFocusSuggestion()
+                        FocusNudgeHUDController.shared.show(suggestion: preview, store: store, isPreview: true)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Preview Nudge")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(Color.primary.opacity(0.07))
+                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.75))
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
 
             surfaceCard {
@@ -154,27 +167,23 @@ struct FocusPatternsSettingsView: View {
                     }
                 }
 
-                // 12 crisp 2-hour vertical bars
                 HStack(alignment: .bottom, spacing: 7) {
                     ForEach(0..<12, id: \.self) { idx in
                         let val = slots[idx]
                         let frac = max(0.06, min(1.0, val / maxVal))
                         let isPeak = (idx == peakIndex && val > 0)
-                        VStack(spacing: 6) {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(
-                                    val > 0
-                                        ? (isPeak ? accent : Color.primary.opacity(colorScheme == .dark ? 0.28 : 0.18))
-                                        : Color.primary.opacity(0.06)
-                                )
-                                .frame(height: max(5, CGFloat(frac) * 76))
-                                .frame(maxWidth: .infinity)
-                        }
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(
+                                val > 0
+                                    ? (isPeak ? accent : Color.primary.opacity(colorScheme == .dark ? 0.28 : 0.18))
+                                    : Color.primary.opacity(0.06)
+                            )
+                            .frame(height: max(5, CGFloat(frac) * 76))
+                            .frame(maxWidth: .infinity)
                     }
                 }
                 .frame(height: 82, alignment: .bottom)
 
-                // Clean axis ticks
                 HStack {
                     Text("12a")
                     Spacer()
@@ -321,49 +330,50 @@ struct FocusPatternsSettingsView: View {
         }
     }
 
-    // MARK: - 5. Productive Domain Allowlist & Custom Targets
+    // MARK: - 5. Visual Work & Study Allowlist Selector
 
     private var allowlistCard: some View {
         surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("WORK & STUDY ALLOWLIST")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundStyle(.secondary)
-                    Text("Browsers are never tracked as a whole — only distraction domains. Add domains you always want ignored.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("WORK & STUDY ALLOWLIST")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .tracking(0.8)
+                            .foregroundStyle(.secondary)
+                        Text("Choose websites or Mac apps that Rowe should always treat as productive.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
 
-                HStack(spacing: 8) {
-                    TextField("e.g. docs.swift.org or leetcode.com", text: $newAllowDomain)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .padding(.horizontal, 10)
+                    Spacer()
+
+                    Button {
+                        showAllowlistSelector = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 12.5))
+                            Text("Choose Sites & Apps…")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.primary.opacity(0.05))
-                                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75))
+                            Capsule()
+                                .fill(Color.primary.opacity(0.09))
+                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
                         )
-                        .onSubmit {
-                            store.addFocusAllowlistedDomain(newAllowDomain)
-                            newAllowDomain = ""
-                        }
-
-                    Button("Add") {
-                        store.addFocusAllowlistedDomain(newAllowDomain)
-                        newAllowDomain = ""
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.08)))
                 }
 
-                if !store.focusBehavior.allowlistedDomains.isEmpty {
+                if store.focusBehavior.allowlistedDomains.isEmpty {
+                    Text("No custom exceptions added — browsers are only observed on distraction domains.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                } else {
                     FlowChipStack(items: store.focusBehavior.allowlistedDomains) { domain in
                         store.removeFocusAllowlistedDomain(domain)
                     }
@@ -392,15 +402,33 @@ struct FocusPatternsSettingsView: View {
 
                 Spacer()
 
-                if !MacFocusTracker.shared.hasAccessibilityPermission {
-                    Button("Grant Access") {
-                        MacFocusTracker.shared.requestAccessibilityPermission()
+                if tracker.hasAccessibilityPermission {
+                    Label("Access Granted", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.green.opacity(0.12)))
+                } else {
+                    Button {
+                        tracker.requestAccessibilityPermission()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 11))
+                            Text("Open Accessibility Settings")
+                                .font(.system(size: 11.5, weight: .semibold))
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(Color.primary.opacity(0.09))
+                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+                        )
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.primary.opacity(0.08)))
                 }
             }
         }
@@ -452,6 +480,261 @@ struct FocusPatternsSettingsView: View {
     }
 }
 
+// MARK: - Visual Allowlist Selector Sheet (Sites + Installed Mac Apps + Browse)
+
+private struct InstalledMacAppItem: Identifiable, Hashable {
+    var id: String { path }
+    let name: String
+    let path: String
+    let bundleId: String
+}
+
+private struct MacAllowlistSelectorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var store: WorkspaceStore
+
+    @State private var tab: Int = 0 // 0 = Websites, 1 = Mac Apps
+    @State private var searchText: String = ""
+    @State private var customDomain: String = ""
+    @State private var installedApps: [InstalledMacAppItem] = []
+
+    private var categories: [String] {
+        var seen: [String] = []
+        for p in RoweAllowlistPreset.all where !seen.contains(p.category) {
+            seen.append(p.category)
+        }
+        return seen
+    }
+
+    private var filteredPresets: [RoweAllowlistPreset] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return RoweAllowlistPreset.all }
+        return RoweAllowlistPreset.all.filter {
+            $0.name.lowercased().contains(q) || $0.domain.lowercased().contains(q) || $0.category.lowercased().contains(q)
+        }
+    }
+
+    private var filteredApps: [InstalledMacAppItem] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return installedApps }
+        return installedApps.filter { $0.name.lowercased().contains(q) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Work & Study Allowlist")
+                    .font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
+
+            Picker("", selection: $tab) {
+                Text("Popular Sites").tag(0)
+                Text("Installed Apps").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 18)
+            .padding(.bottom, 10)
+
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12.5))
+                TextField(tab == 0 ? "Filter websites…" : "Filter installed apps…", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+            .padding(.horizontal, 18)
+            .padding(.bottom, 10)
+
+            Divider().opacity(0.25)
+
+            if tab == 0 {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(categories, id: \.self) { category in
+                            let items = filteredPresets.filter { $0.category == category }
+                            if !items.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(category.uppercased())
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .tracking(0.6)
+                                        .foregroundStyle(.secondary)
+
+                                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                                        ForEach(items) { preset in
+                                            let isSelected = store.focusBehavior.allowlistedDomains.contains(preset.domain)
+                                            Button {
+                                                if isSelected {
+                                                    store.removeFocusAllowlistedDomain(preset.domain)
+                                                } else {
+                                                    store.addFocusAllowlistedDomain(preset.domain)
+                                                }
+                                            } label: {
+                                                HStack(spacing: 9) {
+                                                    Image(systemName: preset.icon)
+                                                        .font(.system(size: 13))
+                                                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                                                        .frame(width: 20)
+                                                    VStack(alignment: .leading, spacing: 1) {
+                                                        Text(preset.name)
+                                                            .font(.system(size: 12.5, weight: .medium))
+                                                            .foregroundStyle(.primary)
+                                                            .lineLimit(1)
+                                                        Text(preset.domain)
+                                                            .font(.system(size: 10.5, design: .monospaced))
+                                                            .foregroundStyle(.tertiary)
+                                                            .lineLimit(1)
+                                                    }
+                                                    Spacer(minLength: 4)
+                                                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                                        .font(.system(size: 14))
+                                                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.4))
+                                                }
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 8)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                        .fill(isSelected ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.04))
+                                                        .overlay(
+                                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                                .strokeBorder(isSelected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 0.75)
+                                                        )
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(18)
+                }
+
+                Divider().opacity(0.25)
+
+                HStack(spacing: 8) {
+                    TextField("Other website (e.g. university.edu)", text: $customDomain)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+                        .onSubmit { addCustom() }
+
+                    Button("Add") { addCustom() }
+                        .disabled(customDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(filteredApps) { app in
+                            let key = app.name.lowercased()
+                            let isSelected = store.focusBehavior.allowlistedDomains.contains(key)
+                            Button {
+                                if isSelected {
+                                    store.removeFocusAllowlistedDomain(key)
+                                } else {
+                                    store.addFocusAllowlistedDomain(key)
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
+                                        .resizable()
+                                        .frame(width: 24, height: 24)
+                                    Text(app.name)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.4))
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(isSelected ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.035))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(18)
+                }
+
+                Divider().opacity(0.25)
+
+                HStack {
+                    Text("Missing an app?")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Browse Applications…") {
+                        browseAppBundle()
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+            }
+        }
+        .frame(width: 480, height: 500)
+        .onAppear { loadInstalledApps() }
+    }
+
+    private func addCustom() {
+        let trimmed = customDomain.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        store.addFocusAllowlistedDomain(trimmed)
+        customDomain = ""
+    }
+
+    private func loadInstalledApps() {
+        guard installedApps.isEmpty else { return }
+        let fm = FileManager.default
+        let dirs = [
+            URL(fileURLWithPath: "/Applications"),
+            fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        ]
+        var found: [InstalledMacAppItem] = []
+        var seenNames = Set<String>()
+        for dir in dirs {
+            guard let items = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for url in items where url.pathExtension.lowercased() == "app" {
+                let name = url.deletingPathExtension().lastPathComponent
+                guard !seenNames.contains(name) else { continue }
+                seenNames.insert(name)
+                let bundleId = Bundle(url: url)?.bundleIdentifier ?? name
+                found.append(InstalledMacAppItem(name: name, path: url.path, bundleId: bundleId))
+            }
+        }
+        installedApps = found.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func browseAppBundle() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose an Application"
+        panel.allowedContentTypes = [.application]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let name = url.deletingPathExtension().lastPathComponent
+        store.addFocusAllowlistedDomain(name.lowercased())
+    }
+}
+
 private struct FlowChipStack: View {
     let items: [String]
     let onRemove: (String) -> Void
@@ -460,9 +743,12 @@ private struct FlowChipStack: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(items, id: \.self) { item in
-                    HStack(spacing: 5) {
-                        Text(item)
-                            .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                    HStack(spacing: 6) {
+                        Image(systemName: RoweAllowlistPreset.icon(for: item))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                        Text(RoweAllowlistPreset.displayName(for: item))
+                            .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(.primary)
                         Button {
                             onRemove(item)
@@ -473,7 +759,7 @@ private struct FlowChipStack: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 9)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(
                         Capsule()

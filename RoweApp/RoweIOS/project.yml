@@ -15,6 +15,7 @@ targets:
     sources:
       - path: App
       - path: DesignSystem
+      - path: LiveActivity
       - path: Services
       - path: Views
       - path: ../RoweShared
@@ -34,7 +35,31 @@ targets:
         ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconDark
     dependencies:
       - package: RoweCore
+      - target: RoweWidgetExtension
+        embed: true
+      - sdk: ActivityKit.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework
       - sdk: CryptoKit.framework
+
+  RoweWidgetExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: WidgetExtension
+        excludes:
+          - Info.plist
+      - path: LiveActivity
+    settings:
+      base:
+        INFOPLIST_FILE: WidgetExtension/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.rowe.ios.widgets
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+    dependencies:
+      - sdk: ActivityKit.framework
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework

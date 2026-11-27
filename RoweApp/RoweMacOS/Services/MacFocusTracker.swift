@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import Observation
 import RoweCore
 
 /// Passive, zero-blocking macOS activity observer for Rowe's Adaptive Focus system.
@@ -9,31 +10,44 @@ import RoweCore
 /// - Tracks native distraction apps via `NSWorkspace` and browser distraction domains via local eTLD+1 inspection.
 /// - Applies 120s HID idle cutoff with retroactive timestamp trim, sleep/screen-lock hard stops, and YouTube `/watch` rapid-hop detection.
 @MainActor
+@Observable
 public final class MacFocusTracker {
     public static let shared = MacFocusTracker()
 
-    private weak var store: WorkspaceStore?
-    private var isRunning = false
+    public private(set) var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
 
-    private var activeTarget: String?
-    private var activeSessionStart: Date?
-    private var activeBrowserHost: String?
-    private var pollTimer: Timer?
-    private var workspaceObservers: [NSObjectProtocol] = []
-    private var distributedObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private weak var store: WorkspaceStore?
+    @ObservationIgnored private var isRunning = false
+
+    @ObservationIgnored private var activeTarget: String?
+    @ObservationIgnored private var activeSessionStart: Date?
+    @ObservationIgnored private var activeBrowserHost: String?
+    @ObservationIgnored private var pollTimer: Timer?
+    @ObservationIgnored private var workspaceObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var distributedObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var activeObserver: NSObjectProtocol?
 
     // YouTube /watch rapid-hop detector: (videoId, firstSeenUTC) within rolling 10-minute window
-    private var recentYouTubeVideos: [(id: String, seenAt: Date)] = []
-    private var lastNudgedTargetSessionStart: Date?
+    @ObservationIgnored private var recentYouTubeVideos: [(id: String, seenAt: Date)] = []
+    @ObservationIgnored private var lastNudgedTargetSessionStart: Date?
 
     private static let idleCutoffSeconds: TimeInterval = 120.0
     private static let rapidHopWindowSeconds: TimeInterval = 10 * 60
     private static let rapidHopThreshold = 3
 
-    private init() {}
+    private init() {
+        activeObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshAccessibilityStatus() }
+        }
+    }
 
     public func start(with store: WorkspaceStore) {
         self.store = store
+        refreshAccessibilityStatus()
         guard !isRunning else { return }
         isRunning = true
 
@@ -92,13 +106,17 @@ public final class MacFocusTracker {
         isRunning = false
     }
 
-    public var hasAccessibilityPermission: Bool {
-        AXIsProcessTrusted()
+    public func refreshAccessibilityStatus() {
+        hasAccessibilityPermission = AXIsProcessTrusted()
     }
 
     public func requestAccessibilityPermission() {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+        refreshAccessibilityStatus()
     }
 
     // MARK: - Heartbeat & Context Evaluation

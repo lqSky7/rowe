@@ -146,11 +146,15 @@ public final class WorkspaceStore {
     public var hasLoadedFromDisk: Bool = false
     public var isSyncing: Bool = false
     public var isRealtimeSyncConnected: Bool = false
+    public var hasPendingCloudSync: Bool { !dirtyDocumentIds.isEmpty }
+    public var onTaskMutatedForLiveSync: ((String) -> Void)?
     private var dirtyDocumentIds: Set<String> = []
     private var lastSyncServerTimeMs: Int64 = 0
     private var syncDebounceTask: Task<Void, Never>?
     private var focusSyncDebounceTask: Task<Void, Never>?
     private var sseStreamTask: Task<Void, Never>?
+    private var fallbackPollTask: Task<Void, Never>?
+    private var needsFollowUpSync: Bool = false
     private var firstDirtyAt: Date?
     private var consecutiveSyncFailures: Int = 0
 
@@ -973,8 +977,18 @@ public final class WorkspaceStore {
     }
 
     public func updateBlock(in docId: String, blockId: String, coalesceUndo: Bool = false, _ mutate: (inout Block) -> Void) {
+        var mutatedTaskTitle: String? = nil
         mutateBlocks(in: docId, coalesceUndo: coalesceUndo) { blocks in
-            _ = Self.mutateBlockRecursive(in: &blocks, id: blockId, mutate)
+            _ = Self.mutateBlockRecursive(in: &blocks, id: blockId) { block in
+                mutate(&block)
+                if block.isTask {
+                    mutatedTaskTitle = block.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        if let title = mutatedTaskTitle {
+            scheduleDebouncedCloudSync(delayOverride: 0.25)
+            onTaskMutatedForLiveSync?(title.isEmpty ? "Task updated" : title)
         }
     }
 
@@ -1251,7 +1265,7 @@ public final class WorkspaceStore {
             block.listStyle = .todo
             block.task?.applyStateTransition(to: state)
         }
-        scheduleDebouncedCloudSync(delayOverride: 0.4)
+        scheduleDebouncedCloudSync(delayOverride: 0.25)
     }
 
     @discardableResult
@@ -1284,7 +1298,8 @@ public final class WorkspaceStore {
         mutateBlocks(in: inboxDoc.id) { blocks in
             blocks.append(block)
         }
-        scheduleDebouncedCloudSync(delayOverride: 0.4)
+        scheduleDebouncedCloudSync(delayOverride: 0.25)
+        onTaskMutatedForLiveSync?(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New task" : title)
         let item = ResolvedTaskItem(block: block, documentId: inboxDoc.id, documentTitle: inboxDoc.displayTitle, isInbox: true)
         if !inboxDoc.isLocked, let candidate = NudgeCandidateTask(from: item, in: inboxDoc) {
             Task { await self.estimateAndCacheDuration(for: candidate) }
@@ -1367,7 +1382,8 @@ public final class WorkspaceStore {
         }
 
         documents[sourceDocIdx].updatedAt = Date()
-        persistAndReindex(documents[sourceDocIdx])
+        persistAndReindex(documents[sourceDocIdx], fastSync: true)
+        onTaskMutatedForLiveSync?(block.content.isEmpty ? "Task rescheduled" : block.content)
     }
 
     public func toggleSidebarSection(_ type: SidebarSectionType) {
@@ -1603,7 +1619,8 @@ public final class WorkspaceStore {
     }
 
     public func handleAppBecameActive() {
-        if isSignedIn && sseStreamTask == nil {
+        if isSignedIn {
+            // Always restart SSE on foreground resume so dead background sockets reconnect immediately.
             startRealtimeSyncStream()
         }
         triggerSyncNow()
@@ -1766,6 +1783,8 @@ public final class WorkspaceStore {
     public func startRealtimeSyncStream() {
         guard isSignedIn else { return }
         sseStreamTask?.cancel()
+        fallbackPollTask?.cancel()
+
         sseStreamTask = Task { @MainActor [weak self] in
             var retryDelay: Double = 2.0
             while !Task.isCancelled {
@@ -1794,11 +1813,24 @@ public final class WorkspaceStore {
                 retryDelay = min(30.0, retryDelay * 1.8)
             }
         }
+
+        // Gentle 30s fallback poll ONLY when SSE is disconnected (0 requests while SSE is healthy — zero DDoS).
+        fallbackPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled, let self, self.isSignedIn else { return }
+                if !self.isRealtimeSyncConnected {
+                    await self.syncWithBackend()
+                }
+            }
+        }
     }
 
     public func stopRealtimeSyncStream() {
         sseStreamTask?.cancel()
         sseStreamTask = nil
+        fallbackPollTask?.cancel()
+        fallbackPollTask = nil
         isRealtimeSyncConnected = false
     }
 
@@ -1901,16 +1933,30 @@ public final class WorkspaceStore {
     /// aligns local updatedAt with server timestamps (preventing clock-skew merge drops),
     /// preserves `(Sync Conflict)` copies instead of clobbering unpushed edits, and syncs focus state.
     public func syncWithBackend(forceFullPull: Bool = false) async {
-        guard authSession != nil, !isSyncing else { return }
+        guard authSession != nil else { return }
+        if isSyncing {
+            // Never drop a concurrent task edit or SSE wakeup — queue one immediate follow-up pass.
+            needsFollowUpSync = true
+            return
+        }
         isSyncing = true
         syncDebounceTask?.cancel()
         syncDebounceTask = nil
-        defer { isSyncing = false }
+        defer {
+            isSyncing = false
+            if needsFollowUpSync {
+                needsFollowUpSync = false
+                Task { @MainActor [weak self] in
+                    await self?.syncWithBackend()
+                }
+            }
+        }
 
         do {
             let encoder = Self.makeFractionalISO8601Encoder()
             var pendingIds = (lastSyncServerTimeMs == 0) ? Set(documents.map(\.id)) : dirtyDocumentIds
-            let sinceWatermark: Int64 = forceFullPull ? 0 : lastSyncServerTimeMs
+            // 1s overlap window eliminates millisecond boundary skips between Go time.Now() and SQLite.
+            let sinceWatermark: Int64 = forceFullPull ? 0 : max(0, lastSyncServerTimeMs - 1000)
 
             // Step 1: Pull delta first so tombstones and concurrent edits on another device are applied safely
             let pulled = try await withAuthorizedSession { sess in

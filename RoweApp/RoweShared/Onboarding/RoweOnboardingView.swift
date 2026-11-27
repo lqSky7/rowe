@@ -1,5 +1,10 @@
 import SwiftUI
+import UserNotifications
 import RoweCore
+#if os(macOS)
+import AppKit
+import ApplicationServices
+#endif
 
 /// Smoothed Rowe ribbon mark rendered as a SwiftUI Shape — ideal for GlassGlow Metal shader surfaces.
 public struct RoweRibbonMark: Shape {
@@ -42,12 +47,11 @@ private struct OnboardingSlide: Identifiable {
     let eyebrow: String
     let title: String
     let subtitle: String
-    let symbol: String? // nil uses RoweRibbonMark
-    let palette: GlassGlowPalette
+    let artwork: RoweArtworkKind
 }
 
 /// Consistent, Metal-powered GlassGlow onboarding experience shared across iOS and macOS,
-/// using the app's native adaptive system background and integrated Sign In / Create Account step.
+/// with bespoke GlassGlow artworks reused across Settings, a detailed Permissions step, and integrated Auth.
 public struct RoweOnboardingView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
@@ -64,6 +68,8 @@ public struct RoweOnboardingView: View {
     @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var password: String = ""
+    @State private var notificationsGranted = false
+    @State private var accessibilityGranted = false
     @FocusState private var focusedField: OnboardingField?
     @Namespace private var modePillNS
 
@@ -91,35 +97,38 @@ public struct RoweOnboardingView: View {
     private let slides: [OnboardingSlide] = [
         OnboardingSlide(
             id: 0,
-            eyebrow: "STEP 1 OF 4",
+            eyebrow: "STEP 1 OF 5",
             title: "Welcome to Rowe",
             subtitle: "A calm, tactile workspace for crafted documents, daily planning, and effortless speed — built native for Apple devices.",
-            symbol: nil,
-            palette: RoweOnboardingView.monochromePalette
+            artwork: .welcome
         ),
         OnboardingSlide(
             id: 1,
-            eyebrow: "STEP 2 OF 4",
+            eyebrow: "STEP 2 OF 5",
             title: "Documents That Feel Alive",
             subtitle: "Pair custom wallpapers, editorial typography, multi-card page breaks, and washi or doodle separators in seconds.",
-            symbol: "sparkles.rectangle.stack.fill",
-            palette: RoweOnboardingView.paleGreyPeachPalette
+            artwork: .documents
         ),
         OnboardingSlide(
             id: 2,
-            eyebrow: "STEP 3 OF 4",
+            eyebrow: "STEP 3 OF 5",
             title: "Zero-Knowledge Locked Notes",
             subtitle: "Lock private notes with a 4- or 6-digit PIN. Encrypted on-device with AES-256-GCM so nobody — not even the database — can read them.",
-            symbol: "lock.shield.fill",
-            palette: RoweOnboardingView.paleGreySkyBluePalette
+            artwork: .vaultLock
         ),
         OnboardingSlide(
             id: 3,
-            eyebrow: "STEP 4 OF 4",
+            eyebrow: "STEP 4 OF 5",
+            title: "Adaptive Focus & Permissions",
+            subtitle: "Rowe learns your scroll rhythm and offers a quick task before long sessions — never blocking apps, and keeping everything private on-device.",
+            artwork: .focusPermissions
+        ),
+        OnboardingSlide(
+            id: 4,
+            eyebrow: "STEP 5 OF 5",
             title: "Your Space, Everywhere",
             subtitle: "Sync documents, profile, and your PIN-locked vault across Mac and iPhone.",
-            symbol: nil,
-            palette: RoweOnboardingView.paleSageMistPalette
+            artwork: .syncOrbit
         )
     ]
 
@@ -134,6 +143,7 @@ public struct RoweOnboardingView: View {
     }
 
     private var currentSlide: OnboardingSlide { slides[step] }
+    private var isPermissionsStep: Bool { step == 3 }
     private var isAuthStep: Bool { step == slides.count - 1 }
 
     private var nativeSurfaceBackground: Color {
@@ -188,17 +198,20 @@ public struct RoweOnboardingView: View {
                 .padding(.horizontal, 28)
                 .padding(.top, 22)
 
-                Spacer(minLength: 10)
+                Spacer(minLength: 8)
 
                 if isAuthStep {
                     integratedAuthSlide
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                } else if isPermissionsStep {
+                    permissionsSlideContent
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 } else {
                     introSlideContent
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
 
-                Spacer(minLength: 14)
+                Spacer(minLength: 10)
 
                 HStack(spacing: 8) {
                     ForEach(slides) { s in
@@ -213,7 +226,7 @@ public struct RoweOnboardingView: View {
                     }
                 }
                 .animation(.spring(response: 0.34, dampingFraction: 0.8), value: step)
-                .padding(.bottom, 22)
+                .padding(.bottom, 20)
 
                 if !isAuthStep {
                     Button {
@@ -235,7 +248,7 @@ public struct RoweOnboardingView: View {
                     .buttonStyle(.plain)
                     .frame(maxWidth: 340)
                     .padding(.horizontal, 24)
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 26)
                 }
             }
             .animation(.spring(response: 0.42, dampingFraction: 0.84), value: step)
@@ -248,35 +261,27 @@ public struct RoweOnboardingView: View {
                 }
                 if email.isEmpty { email = store.space.email }
                 store.authErrorMessage = nil
+                refreshPermissions()
                 withAnimation(.spring(response: 0.52, dampingFraction: 0.84)) {
                     appeared = true
                 }
             }
+            #if os(macOS)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                refreshPermissions()
+            }
+            #endif
         }
     }
 
     private var introSlideContent: some View {
         VStack(spacing: 22) {
             ZStack {
-                if let symbol = currentSlide.symbol {
-                    Image(systemName: symbol)
-                        .font(.system(size: 92, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 140, height: 140)
-                        .glassGlow(currentSlide.palette, speed: 0.78, glow: 1.15)
-                        .id("sym-\(step)")
-                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                } else {
-                    RoweRibbonMark()
-                        .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
-                        .foregroundStyle(.white)
-                        .frame(width: 156, height: 118)
-                        .glassGlow(currentSlide.palette, speed: 0.72, glow: 1.2)
-                        .id("mark-\(step)")
-                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                }
+                RoweGlassGlowArtworkView(kind: currentSlide.artwork, size: 132, speed: 0.74, glow: 1.18)
+                    .id("art-\(step)")
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
-            .frame(height: 185)
+            .frame(height: 175)
 
             VStack(spacing: 12) {
                 Text(currentSlide.title)
@@ -297,13 +302,160 @@ public struct RoweOnboardingView: View {
         }
     }
 
+    private var permissionsSlideContent: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                RoweGlassGlowArtworkView(kind: .focusPermissions, size: 108, speed: 0.72, glow: 1.15)
+                    .padding(.top, 4)
+
+                VStack(spacing: 8) {
+                    Text("Adaptive Focus & Permissions")
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.center)
+
+                    Text("Rowe observes your scroll rhythm silently, suggests a quick (≤ 25 min) unlocked task before long sessions, and never blocks apps or reads PIN-locked notes.")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(2.5)
+                        .frame(maxWidth: 400)
+                }
+
+                VStack(spacing: 10) {
+                    permissionRow(
+                        icon: "bell.badge.fill",
+                        title: "Notifications",
+                        detail: "Used for calm, non-blocking task banners and daily reminders. Auto-mutes hours when you dismiss nudges.",
+                        isGranted: notificationsGranted,
+                        buttonTitle: "Allow"
+                    ) {
+                        requestNotifications()
+                    }
+
+                    #if os(macOS)
+                    permissionRow(
+                        icon: "hand.raised.fill",
+                        title: "Accessibility (Mac Activity)",
+                        detail: "Lets Rowe notice distraction apps & browser tabs locally. URLs are classified on-device and never stored.",
+                        isGranted: accessibilityGranted,
+                        buttonTitle: "Open Settings"
+                    ) {
+                        requestMacAccessibility()
+                    }
+                    #endif
+                }
+                .frame(maxWidth: 410)
+                .padding(.top, 2)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 11.5))
+                    Text("All permissions are optional and can be changed anytime in Focus Patterns.")
+                        .font(.system(size: 11.5))
+                }
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+            }
+            .padding(.horizontal, 24)
+        }
+        .scrollIndicators(.hidden)
+        .onAppear { refreshPermissions() }
+    }
+
+    private func permissionRow(
+        icon: String,
+        title: String,
+        detail: String,
+        isGranted: Bool,
+        buttonTitle: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isGranted ? .green : .secondary)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isGranted ? Color.green.opacity(0.12) : Color.primary.opacity(0.06))
+                )
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 8)
+                    if isGranted {
+                        Label("Allowed", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(.green)
+                    } else {
+                        Button(buttonTitle, action: action)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.primary))
+                    }
+                }
+
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(1.5)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.75)
+                )
+        )
+    }
+
+    private func refreshPermissions() {
+        Task {
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            await MainActor.run {
+                notificationsGranted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+            }
+        }
+        #if os(macOS)
+        accessibilityGranted = AXIsProcessTrusted()
+        #endif
+    }
+
+    private func requestNotifications() {
+        Task {
+            let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) ?? false
+            await MainActor.run {
+                notificationsGranted = granted
+            }
+        }
+    }
+
+    #if os(macOS)
+    private func requestMacAccessibility() {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+        accessibilityGranted = AXIsProcessTrusted()
+    }
+    #endif
+
     private var integratedAuthSlide: some View {
         VStack(spacing: 18) {
-            RoweRibbonMark()
-                .stroke(style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
-                .foregroundStyle(.white)
-                .frame(width: 96, height: 72)
-                .glassGlow(Self.paleSageMistPalette, speed: 0.72, glow: 1.05)
+            RoweGlassGlowArtworkView(kind: .syncOrbit, size: 84, speed: 0.72, glow: 1.08)
 
             VStack(spacing: 6) {
                 Text(isRegisterMode ? "Create your Rowe account" : "Sign in to Rowe")

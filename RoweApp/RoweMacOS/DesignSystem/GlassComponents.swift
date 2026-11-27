@@ -81,6 +81,24 @@ struct RoweNativeGlassBackdrop: NSViewRepresentable {
     }
 }
 
+/// Native macOS sidebar backdrop using Apple's recommended `NSVisualEffectView`
+/// with `.material = .sidebar` and `.blendingMode = .behindWindow` for crisp contrast.
+struct MacSidebarBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let fx = NSVisualEffectView()
+        fx.material = .sidebar
+        fx.blendingMode = .behindWindow
+        fx.state = .followsWindowActiveState
+        return fx
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = .sidebar
+        nsView.blendingMode = .behindWindow
+        nsView.state = .followsWindowActiveState
+    }
+}
+
 /// Applies native macOS 26+ Liquid Glass when available, falling back cleanly
 /// to translucent material + subtle specular rim on macOS 15.
 struct LiquidGlassSurfaceModifier<S: InsettableShape>: ViewModifier {

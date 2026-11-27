@@ -144,7 +144,6 @@ struct CalendarTasksView: View {
         }
         let showCompleted = expandedCompletedDays.contains(day)
         let isDayDropTarget = dropTargetedDay == day
-        let allTodayCleared = isToday && pendingTasks.isEmpty && !finishedTasks.isEmpty
 
         return HStack(alignment: .top, spacing: 18) {
             VStack(alignment: .leading, spacing: 2) {
@@ -176,13 +175,7 @@ struct CalendarTasksView: View {
                             .transition(.roweUnblur)
                     }
 
-                    // Minimal celebration state when all of Today's tasks are cleared
-                    if allTodayCleared || (isToday && showTodayCelebration) {
-                        todayCelebrationBanner
-                            .transition(.roweUnblur)
-                    }
-
-                    if !finishedTasks.isEmpty || isToday {
+                    if (pendingTasks.isEmpty && !finishedTasks.isEmpty) || showCompleted {
                         Button {
                             HapticsManager.shared.tap()
                             withAnimation(CraftTheme.craftSpring(reduceMotion: reduceMotion)) {
@@ -196,8 +189,8 @@ struct CalendarTasksView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "tray.full")
                                     .font(.system(size: 11.5))
-                                Text(showCompleted ? "Hide Completed Tasks (\(finishedTasks.count))" : "View Completed Tasks" + (finishedTasks.isEmpty ? "" : " (\(finishedTasks.count))"))
-                                    .font(.system(size: 12.5))
+                                Text(showCompleted ? "Hide Completed (\(finishedTasks.count))" : "View Completed (\(finishedTasks.count))")
+                                    .font(.system(size: 12.5, weight: .medium))
                             }
                             .foregroundStyle(.secondary)
                             .padding(.top, 2)
@@ -309,7 +302,7 @@ struct CalendarTasksView: View {
                 AnimatedStrikethroughText(
                     item.block.content,
                     isStruck: isDone && store.settings.completedTaskStyle == .strikethrough,
-                    font: .system(size: 13.5),
+                    font: .system(size: 13.5, weight: .medium),
                     lineLimit: 2,
                     reduceMotion: reduceMotion
                 )

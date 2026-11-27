@@ -11,11 +11,19 @@ struct RoweIOSApp: App {
             IOSRootShellView(store: store)
                 .onAppear {
                     IOSFocusManager.shared.configure(with: store)
+                    store.onTaskMutatedForLiveSync = { title in
+                        IOSLiveActivitySyncManager.shared.syncTaskInBackground(store: store, taskTitle: title)
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
+                    switch phase {
+                    case .active:
                         store.handleAppBecameActive()
                         IOSFocusManager.shared.importSharedDeviceActivityEvents()
+                    case .background, .inactive:
+                        IOSLiveActivitySyncManager.shared.flushPendingOnBackground(store: store)
+                    @unknown default:
+                        break
                     }
                 }
         }

@@ -10,7 +10,7 @@ struct RoweApp: App {
         WindowGroup("Rowe") {
             CraftWindowShell(store: store)
                 .frame(minWidth: 900, minHeight: 620)
-                .containerBackground(.ultraThinMaterial, for: .window)
+                .background(MacSidebarBackdrop().ignoresSafeArea())
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

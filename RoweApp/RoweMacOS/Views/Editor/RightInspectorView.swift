@@ -62,7 +62,7 @@ struct RightInspectorView: View {
             }
         }
         .frame(width: 268)
-        .background(.ultraThinMaterial)
+        .background(MacSidebarBackdrop())
     }
 
     // MARK: - Insert Tab

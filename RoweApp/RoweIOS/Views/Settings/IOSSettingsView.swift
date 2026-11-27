@@ -70,7 +70,18 @@ struct IOSSettingsView: View {
                             store.pinPromptRequest = .setupPin(lockDocumentId: nil)
                         }
                     } label: {
-                        settingsRow(store.hasVaultPin ? "Security · PIN Lock On" : "Security · Set Up PIN", icon: "lock")
+                        HStack(spacing: 14) {
+                            RoweGlassGlowArtworkView(kind: .vaultLock, size: 28, speed: 0.7, glow: 0.9)
+                            Text(store.hasVaultPin ? "Security · PIN Lock On" : "Security · Set Up PIN")
+                                .font(.system(size: 16.5))
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     Divider().opacity(0.2).padding(.leading, 42)
@@ -258,6 +269,20 @@ private struct IOSAppearanceSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 14) {
+                    RoweGlassGlowArtworkView(kind: .documents, size: 52, speed: 0.72, glow: 1.05)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Appearance & Craft")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        Text("Theme, accent color, sound & haptics.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.primary.opacity(0.07)))
+
                 // 3-iPhone Appearance Picker
                 HStack(spacing: 16) {
                     ForEach(AppearanceMode.allCases, id: \.self) { mode in
@@ -428,8 +453,22 @@ private struct IOSAccountSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                IOSSpaceAvatar(space: store.space, size: 96, cornerRadius: 48)
-                    .padding(.top, 10)
+                HStack(spacing: 14) {
+                    RoweGlassGlowArtworkView(kind: .syncOrbit, size: 52, speed: 0.72, glow: 1.05)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Your Space, Everywhere")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        Text(store.isSignedIn ? "Cloud sync active across devices." : "Sign in to sync across Mac and iPhone.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(16)
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.primary.opacity(0.07)))
+
+                IOSSpaceAvatar(space: store.space, size: 88, cornerRadius: 44)
+                    .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {

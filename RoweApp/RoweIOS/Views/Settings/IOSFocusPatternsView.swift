@@ -2,14 +2,55 @@ import SwiftUI
 import UserNotifications
 import RoweCore
 
-/// Non-AI-slop, Apple-native editorial Settings view for Rowe's Adaptive Focus system on iOS.
-/// Monochrome translucent surfaces + user's single pastel accent, crisp tabular figures, zero blocking.
+/// Native iOS Settings Form for Rowe's Adaptive Focus system.
+/// Reuses onboarding GlassGlow artwork, uses standard iOS `Form` / `Section` controls,
+/// gates explanatory text behind `i` buttons, and uses a visual Site Selector sheet.
 struct IOSFocusPatternsView: View {
     @Bindable var store: WorkspaceStore
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var newAllowDomain: String = ""
-    @State private var bannerFeedback: String?
+    @State private var bannerSent: Bool = false
+    @State private var activeInfo: FocusInfoTopic?
+    @State private var showSiteSelector: Bool = false
+
+    private enum FocusInfoTopic: String, Identifiable {
+        case nudges
+        case circadian
+        case observed
+        case learned
+        case shortcuts
+        case allowlist
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .nudges: "Adaptive Task Nudges"
+            case .circadian: "Circadian Rhythm"
+            case .observed: "Observed Apps & Sites"
+            case .learned: "Learned Windows"
+            case .shortcuts: "Instant 0-Second iPhone Nudges"
+            case .allowlist: "Work & Study Allowlist"
+            }
+        }
+
+        var message: String {
+            switch self {
+            case .nudges:
+                "Rowe observes your scroll rhythm across Mac and iPhone and suggests a quick (≤ 25 min) unlocked task before long sessions. It never blocks apps, never reads PIN-locked notes, and stays silent if you have no quick tasks."
+            case .circadian:
+                "Shows your deduplicated 7-day scroll minutes across Mac and iPhone grouped into 2-hour windows. Overlapping sessions on both devices are merged so time is never double-counted."
+            case .observed:
+                "Rowe observes silently for the first 3 sessions per app to calibrate your typical session length before offering suggestions."
+            case .learned:
+                "As you accept or dismiss nudges, Rowe learns which time windows welcome a quick task and automatically mutes hours where you prefer to unwind, gently re-checking once every ~3 weeks."
+            case .shortcuts:
+                "To trigger instant non-blocking banners when you open Instagram, YouTube, or Reddit:\n\n1. Open Apple Shortcuts → Automation → + → App.\n2. Pick the app (Is Opened + Run Immediately) and add Rowe's \"Log App Opened for Focus Nudge\".\n3. Optional: add an Is Closed automation with \"Log App Closed\" for exact session length."
+            case .allowlist:
+                "Browsers are never tracked as a whole — only distraction domains. Pick work or study sites so they are always ignored. Only aggregate rhythm syncs across devices."
+            }
+        }
+    }
 
     private var accent: Color { Color(hex: store.settings.accentColor.hex) }
 
@@ -56,405 +97,265 @@ struct IOSFocusPatternsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                masterCard
-                circadianRhythmCard
-                observedTargetsCard
-                receptivityCard
-                shortcutsSetupCard
-                allowlistCard
-                privacyFooterCard
+        Form {
+            // Reused Onboarding GlassGlow Focus Artwork Header
+            Section {
+                HStack(spacing: 16) {
+                    RoweGlassGlowArtworkView(kind: .focusPermissions, size: 54, speed: 0.72, glow: 1.05)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Adaptive Focus")
+                            .font(.headline)
+                        Text("Calm, non-blocking task nudges.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
             }
-            .padding(18)
-            .padding(.bottom, 40)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .navigationTitle("Focus Patterns")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await IOSFocusManager.shared.refreshNotificationStatus()
-        }
-    }
 
-    // MARK: - 1. Master Toggle & Live Banner Test
-
-    private var masterCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Toggle(isOn: Binding(
+            // 1. Master Toggle & Preview
+            Section {
+                Toggle("Adaptive Task Nudges", isOn: Binding(
                     get: { store.focusBehavior.isEnabled },
                     set: { val in
                         IOSHaptics.shared.toggle()
                         store.toggleFocusEnabled(val)
                     }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Adaptive Task Nudges")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Suggests a quick (≤ 25m) task before long scroll sessions. Never blocks apps.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+                ))
+
+                Button {
+                    IOSHaptics.shared.tap()
+                    Task {
+                        await IOSFocusManager.shared.sendPreviewBanner(for: store)
+                        withAnimation { bannerSent = true }
+                        try? await Task.sleep(nanoseconds: 2_200_000_000)
+                        withAnimation { bannerSent = false }
+                    }
+                } label: {
+                    HStack {
+                        Label("Test Banner Nudge", systemImage: "bell.badge")
+                        Spacer()
+                        if bannerSent {
+                            Text("Sent")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
-
-                Divider().opacity(0.22)
-
-                HStack(spacing: 10) {
-                    Button {
-                        IOSHaptics.shared.tap()
-                        Task {
-                            await IOSFocusManager.shared.sendPreviewBanner(for: store)
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                bannerFeedback = "Preview banner sent"
-                            }
-                            try? await Task.sleep(nanoseconds: 2_500_000_000)
-                            withAnimation { bannerFeedback = nil }
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "bell.badge")
-                                .font(.system(size: 13, weight: .medium))
-                            Text("Test Banner Nudge")
-                                .font(.system(size: 13.5, weight: .semibold))
-                        }
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(Capsule().fill(Color.primary.opacity(0.08)))
-                    }
-                    .buttonStyle(RowePressScaleStyle())
-
-                    Spacer()
-
-                    if let msg = bannerFeedback {
-                        Text(msg)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .transition(.opacity)
-                    }
-                }
+            } header: {
+                sectionHeader("Focus Nudges", info: .nudges)
             }
+
+            // 2. Circadian Rhythm
+            Section {
+                circadianChartRow
+            } header: {
+                sectionHeader("Circadian Rhythm · 7 Days", info: .circadian)
+            }
+
+            // 3. Observed Apps & Sites
+            Section {
+                if observedTargets.isEmpty {
+                    Text("Observing silently")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(observedTargets, id: \.slug) { row in
+                        HStack(spacing: 12) {
+                            Image(systemName: row.icon)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22)
+                            Text(row.name)
+                            Spacer()
+                            Text("~\(formatMinutes(row.medianMins)) · \(row.sessions)×")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                sectionHeader("Observed Apps & Sites", info: .observed)
+            }
+
+            // 4. Learned Windows & Muted Slots
+            Section {
+                if silencedSlots.isEmpty && learnedActiveSlots.isEmpty {
+                    Text("No learned windows yet")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(silencedSlots, id: \.key) { item in
+                        HStack {
+                            Label(item.label, systemImage: "bell.slash")
+                                .lineLimit(1)
+                            Spacer()
+                            Button("Unmute") {
+                                IOSHaptics.shared.tap()
+                                store.unmuteFocusSlot(storageKey: item.key)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    ForEach(learnedActiveSlots.prefix(5), id: \.key) { item in
+                        HStack {
+                            Text(item.label)
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(Int((item.rec.score * 100).rounded()))%")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                sectionHeader("Learned Windows", info: .learned)
+            }
+
+            // 5. iPhone 0-Second Shortcuts Automation (gated behind i button)
+            Section {
+                Button {
+                    IOSHaptics.shared.tap()
+                    activeInfo = .shortcuts
+                } label: {
+                    HStack {
+                        Label("Shortcuts 0s Setup Guide", systemImage: "bolt.horizontal")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                sectionHeader("iPhone Automation", info: .shortcuts)
+            }
+
+            // 6. Visual Work & Study Allowlist Selector
+            Section {
+                Button {
+                    IOSHaptics.shared.tap()
+                    showSiteSelector = true
+                } label: {
+                    Label("Select Work & Study Sites", systemImage: "plus.circle")
+                }
+
+                ForEach(store.focusBehavior.allowlistedDomains, id: \.self) { domain in
+                    HStack(spacing: 10) {
+                        Image(systemName: RoweAllowlistPreset.icon(for: domain))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20)
+                        Text(RoweAllowlistPreset.displayName(for: domain))
+                        Spacer()
+                        if RoweAllowlistPreset.displayName(for: domain) != domain {
+                            Text(domain)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .onDelete { offsets in
+                    let domains = store.focusBehavior.allowlistedDomains
+                    for idx in offsets {
+                        store.removeFocusAllowlistedDomain(domains[idx])
+                    }
+                }
+            } header: {
+                sectionHeader("Work & Study Allowlist", info: .allowlist)
+            }
+        }
+        .navigationTitle("Focus Patterns")
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+        .sheet(isPresented: $showSiteSelector) {
+            IOSAllowlistSelectorSheet(store: store)
+        }
+        .alert(
+            activeInfo?.title ?? "",
+            isPresented: Binding(
+                get: { activeInfo != nil },
+                set: { if !$0 { activeInfo = nil } }
+            ),
+            presenting: activeInfo
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { topic in
+            Text(topic.message)
+        }
+        .task {
+            await IOSFocusManager.shared.refreshNotificationStatus()
         }
     }
 
-    // MARK: - 2. 24-Hour Circadian Rhythm Card
+    private func sectionHeader(_ title: String, info: FocusInfoTopic) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Button {
+                IOSHaptics.shared.tap()
+                activeInfo = info
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+            }
+            .buttonStyle(.plain)
+        }
+    }
 
-    private var circadianRhythmCard: some View {
+    private var circadianChartRow: some View {
         let slots = circadianSlots
         let maxVal = max(30.0, slots.max() ?? 30.0)
         let peakIndex = slots.enumerated().max(by: { $0.element < $1.element })?.offset
 
-        return surfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("CIRCADIAN RHYTHM · 7 DAYS")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .tracking(0.8)
-                            .foregroundStyle(.secondary)
-                        Text(totalMinutes7d > 0 ? "\(formatMinutes(totalMinutes7d)) across Mac & iPhone" : "Observing silently to calibrate baseline")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.primary)
-                    }
-                    Spacer()
-                    if let peak = peakIndex, slots[peak] > 0 {
-                        Text(slotRangeShort(peak))
-                            .font(.system(size: 11.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack(alignment: .bottom, spacing: 6) {
-                    ForEach(0..<12, id: \.self) { idx in
-                        let val = slots[idx]
-                        let frac = max(0.06, min(1.0, val / maxVal))
-                        let isPeak = (idx == peakIndex && val > 0)
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(
-                                val > 0
-                                    ? (isPeak ? accent : Color.primary.opacity(colorScheme == .dark ? 0.28 : 0.18))
-                                    : Color.primary.opacity(0.07)
-                            )
-                            .frame(height: max(5, CGFloat(frac) * 74))
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .frame(height: 80, alignment: .bottom)
-
-                HStack {
-                    Text("12a")
-                    Spacer()
-                    Text("4a")
-                    Spacer()
-                    Text("8a")
-                    Spacer()
-                    Text("12p")
-                    Spacer()
-                    Text("4p")
-                    Spacer()
-                    Text("8p")
-                    Spacer()
-                    Text("12a")
-                }
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    // MARK: - 3. Observed Targets
-
-    private var observedTargetsCard: some View {
-        let rows = observedTargets
-        let maxMed = max(30, rows.map(\.medianMins).max() ?? 30)
-
-        return surfaceCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("OBSERVED APPS & SITES")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.secondary)
-
-                if rows.isEmpty {
-                    Text("No sessions logged yet. Rowe observes silently for 3 sessions per app before nudging.")
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(.secondary)
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(rows, id: \.slug) { row in
-                            HStack(spacing: 12) {
-                                Image(systemName: row.icon)
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 28, height: 28)
-                                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
-
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack {
-                                        Text(row.name)
-                                            .font(.system(size: 14.5, weight: .medium))
-                                        Spacer()
-                                        Text("~\(formatMinutes(row.medianMins)) · \(row.sessions)×")
-                                            .font(.system(size: 12, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    }
-
-                                    GeometryReader { geo in
-                                        ZStack(alignment: .leading) {
-                                            Capsule().fill(Color.primary.opacity(0.07))
-                                            Capsule()
-                                                .fill(accent.opacity(0.8))
-                                                .frame(width: max(8, geo.size.width * CGFloat(row.medianMins) / CGFloat(maxMed)))
-                                        }
-                                    }
-                                    .frame(height: 4)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - 4. Learned Receptivity & Muted Slots
-
-    private var receptivityCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("LEARNED WINDOWS")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("Auto-checks ~3w")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.tertiary)
-                }
-
-                if silencedSlots.isEmpty && learnedActiveSlots.isEmpty {
-                    Text("Dismissing nudges during a specific time window automatically teaches Rowe to leave you alone during those hours.")
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(.secondary)
-                } else {
-                    VStack(spacing: 10) {
-                        ForEach(silencedSlots, id: \.key) { item in
-                            HStack(spacing: 10) {
-                                Image(systemName: "bell.slash")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.label)
-                                        .font(.system(size: 14, weight: .medium))
-                                    Text("Auto-muted · \(item.rec.dismissedCount) dismissed")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button("Unmute") {
-                                    IOSHaptics.shared.tap()
-                                    store.unmuteFocusSlot(storageKey: item.key)
-                                }
-                                .font(.system(size: 12.5, weight: .semibold))
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(Color.primary.opacity(0.09)))
-                            }
-                        }
-
-                        ForEach(learnedActiveSlots.prefix(5), id: \.key) { item in
-                            HStack(spacing: 10) {
-                                Circle().fill(accent).frame(width: 6, height: 6)
-                                Text(item.label)
-                                    .font(.system(size: 13.5))
-                                Spacer()
-                                Text("\(Int((item.rec.score * 100).rounded()))%")
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - 5. Instant 0-Second iOS Shortcuts Automation Guide
-
-    private var shortcutsSetupCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("INSTANT 0-SECOND IPHONE NUDGES")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.secondary)
-
-                Text("For instant non-blocking banners the moment you open Instagram, YouTube, or Reddit on iPhone:")
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    stepRow("1", "Open Apple Shortcuts → Automation → + → App.")
-                    stepRow("2", "Pick Instagram (Is Opened + Run Immediately) → add Rowe's \"Log App Opened for Focus Nudge\".")
-                    stepRow("3", "Optional: add a matching Is Closed automation with \"Log App Closed\" for exact session length.")
-                }
-                .padding(.top, 2)
-            }
-        }
-    }
-
-    private func stepRow(_ num: String, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(num)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(Color.primary.opacity(0.07)))
-            Text(text)
-                .font(.system(size: 13))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    // MARK: - 6. Work & Study Allowlist
-
-    private var allowlistCard: some View {
-        surfaceCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("WORK & STUDY ALLOWLIST")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 8) {
-                    TextField("Add domain (e.g. github.com)", text: $newAllowDomain)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.system(size: 14.5))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
-                        .onSubmit {
-                            store.addFocusAllowlistedDomain(newAllowDomain)
-                            newAllowDomain = ""
-                        }
-
-                    Button("Add") {
-                        IOSHaptics.shared.tap()
-                        store.addFocusAllowlistedDomain(newAllowDomain)
-                        newAllowDomain = ""
-                    }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.09)))
-                }
-
-                if !store.focusBehavior.allowlistedDomains.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(store.focusBehavior.allowlistedDomains, id: \.self) { domain in
-                                HStack(spacing: 6) {
-                                    Text(domain)
-                                        .font(.system(size: 12.5, design: .monospaced))
-                                    Button {
-                                        IOSHaptics.shared.tap()
-                                        store.removeFocusAllowlistedDomain(domain)
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(Color.primary.opacity(0.07)))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - 7. Privacy Footer
-
-    private var privacyFooterCard: some View {
-        surfaceCard {
-            HStack(spacing: 12) {
-                Image(systemName: "lock.shield")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Zero-Knowledge Private")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("PIN-locked notes are never read or suggested. Only aggregate app rhythm syncs between your devices.")
-                        .font(.system(size: 12.5))
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(totalMinutes7d > 0 ? formatMinutes(totalMinutes7d) : "Calibrating")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                if let peak = peakIndex, slots[peak] > 0 {
+                    Text("Peak \(slotRangeShort(peak))")
+                        .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                 }
             }
+
+            HStack(alignment: .bottom, spacing: 5) {
+                ForEach(0..<12, id: \.self) { idx in
+                    let val = slots[idx]
+                    let frac = max(0.08, min(1.0, val / maxVal))
+                    let isPeak = (idx == peakIndex && val > 0)
+                    RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                        .fill(
+                            val > 0
+                                ? (isPeak ? accent : Color.primary.opacity(colorScheme == .dark ? 0.28 : 0.18))
+                                : Color.primary.opacity(0.08)
+                        )
+                        .frame(height: max(5, CGFloat(frac) * 56))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 60, alignment: .bottom)
+
+            HStack {
+                Text("12a")
+                Spacer()
+                Text("4a")
+                Spacer()
+                Text("8a")
+                Spacer()
+                Text("12p")
+                Spacer()
+                Text("4p")
+                Spacer()
+                Text("8p")
+                Spacer()
+                Text("12a")
+            }
+            .font(.caption2.monospaced())
+            .foregroundStyle(.tertiary)
         }
-    }
-
-    // MARK: - Helpers
-
-    private func surfaceCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.065 : 0.045))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.07), lineWidth: 0.75)
-                    )
-            )
+        .padding(.vertical, 4)
     }
 
     private func formatMinutes(_ mins: Int) -> String {
@@ -484,5 +385,106 @@ struct IOSFocusPatternsView: View {
         let day = parts[1].capitalized
         let slot = FocusSlotKey(canonicalTarget: parts[0], dayType: DayType(rawValue: parts[1]) ?? .weekday, twoHourSlot: slotIdx)
         return "\(app) · \(day) \(slot.humanTimeWindow)"
+    }
+}
+
+// MARK: - Native iOS Visual Site Selector Sheet
+
+private struct IOSAllowlistSelectorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var store: WorkspaceStore
+
+    @State private var searchText: String = ""
+    @State private var customDomain: String = ""
+
+    private var categories: [String] {
+        var seen: [String] = []
+        for p in RoweAllowlistPreset.all where !seen.contains(p.category) {
+            seen.append(p.category)
+        }
+        return seen
+    }
+
+    private var filteredPresets: [RoweAllowlistPreset] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return RoweAllowlistPreset.all }
+        return RoweAllowlistPreset.all.filter {
+            $0.name.lowercased().contains(q) || $0.domain.lowercased().contains(q) || $0.category.lowercased().contains(q)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                ForEach(categories, id: \.self) { category in
+                    let items = filteredPresets.filter { $0.category == category }
+                    if !items.isEmpty {
+                        Section(category) {
+                            ForEach(items) { preset in
+                                let isSelected = store.focusBehavior.allowlistedDomains.contains(preset.domain)
+                                Button {
+                                    IOSHaptics.shared.tap()
+                                    if isSelected {
+                                        store.removeFocusAllowlistedDomain(preset.domain)
+                                    } else {
+                                        store.addFocusAllowlistedDomain(preset.domain)
+                                    }
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: preset.icon)
+                                            .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                                            .frame(width: 22)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(preset.name)
+                                                .foregroundStyle(.primary)
+                                            Text(preset.domain)
+                                                .font(.caption.monospaced())
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if isSelected {
+                                            Image(systemName: "checkmark")
+                                                .fontWeight(.semibold)
+                                                .foregroundStyle(Color.accentColor)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section("Other Website") {
+                    HStack {
+                        TextField("e.g. university.edu", text: $customDomain)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.done)
+                            .onSubmit { addCustom() }
+
+                        if !customDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Button("Add") { addCustom() }
+                                .fontWeight(.semibold)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Sites")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Filter sites")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func addCustom() {
+        let trimmed = customDomain.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        IOSHaptics.shared.tap()
+        store.addFocusAllowlistedDomain(trimmed)
+        customDomain = ""
     }
 }

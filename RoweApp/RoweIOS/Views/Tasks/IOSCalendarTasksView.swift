@@ -6,28 +6,26 @@ enum IOSTaskViewMode {
     case allTasks
 }
 
-/// iOS Calendar & Tasks view matching the macOS Calendar experience:
-/// - Date-grouped timeline (`Nov 26 / Today · Thursday` in accent color, Tomorrow, Upcoming)
-/// - 2-second linger before completed/crossed-out tasks disappear into Completed
-/// - Animated sweeping strikethrough (`AnimatedStrikethroughText`)
-/// - Single-tap complete, double-tap (or swipe) red cross-out with haptics
-/// - Pull down / tap pill to reveal or hide previous days.
+/// iOS Calendar & Tasks view refined to match Craft's calm rhythm:
+/// - Date-grouped timeline with crisp hairline separators under every day header
+/// - Bolder, easy-to-read multiline task titles
+/// - "Show Previous Days" revealed on a gentle pull-down (below search trigger) and hidden when leaving the tab
+/// - "View Completed" shown only once all tasks for a day are completed (replacing the sparkle banner)
+/// - Tapping any task or '+' opens the unified floating Task Composer (Date, Deadline, Repeat, Reminder, Notes).
 struct IOSCalendarTasksView: View {
     @Bindable var store: WorkspaceStore
     let mode: IOSTaskViewMode
     let zoomNamespace: Namespace.ID
     var onOpenSettings: () -> Void
     var onOpenQuickAdd: (Date?) -> Void
+    var onEditTask: (ResolvedTaskItem) -> Void
 
-    @Namespace private var taskSheetNS
     @State private var showCompleted: Bool = false
     @State private var showPreviousDays: Bool = false
+    @State private var isPreviousDaysRevealed: Bool = false
     @State private var expandedCompletedDays: Set<Date> = []
     @State private var lingeringTaskIds: Set<String> = []
     @State private var lingerTimers: [String: Task<Void, Never>] = [:]
-    @State private var showTodayCelebration: Bool = false
-    @State private var celebrationBurstProgress: CGFloat = 0
-    @State private var editingTask: ResolvedTaskItem? = nil
 
     private var reduceMotion: Bool {
         store.settings.reduceAnimations
@@ -106,24 +104,27 @@ struct IOSCalendarTasksView: View {
                 .padding(.top, 8)
 
                 if mode == .calendar {
-                    // Muted text toggle matching View Completed
-                    Button {
-                        IOSHaptics.shared.tap()
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            showPreviousDays.toggle()
+                    // Locked behind a gentle pull-down scroll (26pt–85pt); auto-hides when switching tabs
+                    if isPreviousDaysRevealed || showPreviousDays {
+                        Button {
+                            IOSHaptics.shared.tap()
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                showPreviousDays.toggle()
+                                if !showPreviousDays { isPreviousDaysRevealed = false }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 12))
+                                Text(showPreviousDays ? "Hide Previous Days" : "Show Previous Days")
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundStyle(.secondary)
                         }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 12))
-                            Text(showPreviousDays ? "Hide Previous Days" : "Show Previous Days")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 18)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .buttonStyle(.plain)
-                    .transaction { $0.animation = nil }
-                    .padding(.horizontal, 18)
 
                     VStack(alignment: .leading, spacing: 34) {
                         ForEach(visibleDays, id: \.self) { day in
@@ -137,18 +138,25 @@ struct IOSCalendarTasksView: View {
             }
             .padding(.bottom, 120)
         }
+        .onScrollGeometryChange(for: CGFloat.self) { geo in
+            geo.contentOffset.y + geo.contentInsets.top
+        } action: { _, adjustedOffset in
+            guard mode == .calendar else { return }
+            let pulled = max(0, -adjustedOffset)
+            if pulled >= 26 && pulled < 85 && !isPreviousDaysRevealed && !showPreviousDays {
+                IOSHaptics.shared.tap()
+                withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
+                    isPreviousDaysRevealed = true
+                }
+            }
+        }
+        .onDisappear {
+            isPreviousDaysRevealed = false
+            showPreviousDays = false
+        }
         .iosPullDownToSearch(isPresented: $store.isQuickOpenPresented, reduceMotion: reduceMotion)
         .scrollDismissesKeyboard(.interactively)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $editingTask) { taskItem in
-            IOSTaskEditorSheet(store: store, item: taskItem) {
-                editingTask = nil
-            }
-            .navigationTransition(.zoom(sourceID: "task-\(taskItem.id)", in: taskSheetNS))
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .presentationCornerRadius(28)
-        }
     }
 
     private func daySection(for day: Date) -> some View {
@@ -176,94 +184,74 @@ struct IOSCalendarTasksView: View {
         let weekday = day.formatted(.dateTime.weekday(.wide))
 
         return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    if isToday {
-                        Text(monthDay)
-                            .font(.system(size: 28, weight: .bold))
-                        HStack(spacing: 6) {
-                            Text("Today")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.primary)
-                            Text("· \(weekday)")
-                                .font(.system(size: 16, weight: .regular))
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if isToday {
                             Text(monthDay)
-                                .font(.system(size: 19, weight: .bold))
-                            if isTomorrow {
-                                Text("Tomorrow")
-                                    .font(.system(size: 17, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                            } else if isYesterday {
-                                Text("Yesterday")
-                                    .font(.system(size: 17, weight: .medium))
+                                .font(.system(size: 28, weight: .bold))
+                            HStack(spacing: 6) {
+                                Text("Today")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(selectedAccent)
+                                Text("· \(weekday)")
+                                    .font(.system(size: 16, weight: .regular))
                                     .foregroundStyle(.secondary)
                             }
-                            Text("· \(weekday)")
-                                .font(.system(size: 17, weight: .regular))
-                                .foregroundStyle(.secondary)
+                        } else {
+                            HStack(spacing: 6) {
+                                Text(monthDay)
+                                    .font(.system(size: 19, weight: .bold))
+                                if isTomorrow {
+                                    Text("Tomorrow")
+                                        .font(.system(size: 17, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                } else if isYesterday {
+                                    Text("Yesterday")
+                                        .font(.system(size: 17, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text("· \(weekday)")
+                                    .font(.system(size: 17, weight: .regular))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    Spacer()
+                    Button {
+                        IOSHaptics.shared.tap()
+                        onOpenQuickAdd(day)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(6)
+                    }
                 }
-                Spacer()
-                Button {
-                    IOSHaptics.shared.tap()
-                    onOpenQuickAdd(day)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(6)
-                }
+
+                // Subtle hairline separator matching Craft Calendar
+                Divider()
+                    .opacity(0.28)
             }
             .padding(.horizontal, 18)
 
-            if pendingTasks.isEmpty && isToday {
-                ZStack(alignment: .leading) {
-                    if !reduceMotion && celebrationBurstProgress > 0 && celebrationBurstProgress < 1 {
-                        ForEach(0..<10, id: \.self) { idx in
-                            let angle = Double(idx) * (360.0 / 10.0) * .pi / 180.0
-                            let radius = 14.0 + celebrationBurstProgress * 30.0
-                            Circle()
-                                .fill(idx.isMultiple(of: 2) ? selectedAccent : Color.green)
-                                .frame(width: 4.5, height: 4.5)
-                                .offset(x: 16 + cos(angle) * radius, y: sin(angle) * radius)
-                                .opacity(Double(1.0 - celebrationBurstProgress))
-                        }
-                        .allowsHitTesting(false)
-                    }
-
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 13))
-                            .foregroundStyle(selectedAccent)
-                        Text("All clear for today")
-                            .font(.system(size: 14.5))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 6)
-            } else {
+            if !pendingTasks.isEmpty {
                 VStack(spacing: 2) {
                     ForEach(pendingTasks) { item in
                         IOSTaskRow(store: store, item: item, onSelectTask: {
                             IOSHaptics.shared.tap()
-                            editingTask = item
+                            onEditTask(item)
                         }) { newState in
-                            handleTaskStateChange(item: item, newState: newState, day: day)
+                            handleTaskStateChange(item: item, newState: newState)
                         }
-                        .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                         .transition(.roweUnblur)
                     }
                 }
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pendingTasks.map(\.id))
             }
 
-            if !finishedTasks.isEmpty {
+            // Show "View Completed" only when all tasks for that day are completed (or if user explicitly toggled it)
+            if (pendingTasks.isEmpty && !finishedTasks.isEmpty) || (showDayCompleted && !finishedTasks.isEmpty) {
                 Button {
                     IOSHaptics.shared.tap()
                     withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
@@ -290,11 +278,10 @@ struct IOSCalendarTasksView: View {
                         ForEach(finishedTasks) { item in
                             IOSTaskRow(store: store, item: item, onSelectTask: {
                                 IOSHaptics.shared.tap()
-                                editingTask = item
+                                onEditTask(item)
                             }) { newState in
-                                handleTaskStateChange(item: item, newState: newState, day: day)
+                                handleTaskStateChange(item: item, newState: newState)
                             }
-                            .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                             .transition(.roweUnblur)
                         }
                     }
@@ -325,21 +312,24 @@ struct IOSCalendarTasksView: View {
             .padding(.horizontal, 18)
 
             if pending.isEmpty {
-                ContentUnavailableView(
-                    "All Tasks Done",
-                    systemImage: "checkmark.circle.fill",
-                    description: Text("Tap + below to capture a new task.")
-                )
+                VStack(spacing: 14) {
+                    RoweEmptyStateArtwork(kind: .tasksClear, accent: selectedAccent, size: 96)
+                    Text("All Tasks Done")
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    Text("Tap + below to capture a new task.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
                 .padding(.top, 40)
             } else {
                 ForEach(pending) { item in
                     IOSTaskRow(store: store, item: item, onSelectTask: {
                         IOSHaptics.shared.tap()
-                        editingTask = item
+                        onEditTask(item)
                     }) { newState in
-                        handleTaskStateChange(item: item, newState: newState, day: nil)
+                        handleTaskStateChange(item: item, newState: newState)
                     }
-                    .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                     .transition(.roweUnblur)
                 }
                 .animation(IOSTheme.craftSpring(reduceMotion: reduceMotion), value: pending.map(\.id))
@@ -350,11 +340,10 @@ struct IOSCalendarTasksView: View {
                     ForEach(completed) { item in
                         IOSTaskRow(store: store, item: item, onSelectTask: {
                             IOSHaptics.shared.tap()
-                            editingTask = item
+                            onEditTask(item)
                         }) { newState in
-                            handleTaskStateChange(item: item, newState: newState, day: nil)
+                            handleTaskStateChange(item: item, newState: newState)
                         }
-                        .matchedTransitionSource(id: "task-\(item.id)", in: taskSheetNS)
                     }
                 }
                 .font(.system(size: 14, weight: .semibold))
@@ -365,7 +354,7 @@ struct IOSCalendarTasksView: View {
         }
     }
 
-    private func handleTaskStateChange(item: ResolvedTaskItem, newState: TaskCompletionState, day: Date?) {
+    private func handleTaskStateChange(item: ResolvedTaskItem, newState: TaskCompletionState) {
         let id = item.block.id
         lingerTimers[id]?.cancel()
         lingerTimers.removeValue(forKey: id)
@@ -373,7 +362,6 @@ struct IOSCalendarTasksView: View {
         if newState == .pending {
             withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
                 lingeringTaskIds.remove(id)
-                showTodayCelebration = false
                 store.setTaskState(docId: item.documentId, blockId: id, state: newState)
             }
             return
@@ -390,33 +378,6 @@ struct IOSCalendarTasksView: View {
                 lingeringTaskIds.remove(id)
             }
             lingerTimers.removeValue(forKey: id)
-            if let day {
-                checkTodayCelebration(for: day)
-            }
-        }
-    }
-
-    private func checkTodayCelebration(for day: Date) {
-        let cal = Calendar.current
-        guard cal.isDateInToday(day) else { return }
-        let todayTasks = store.allTasks().filter { item in
-            if let sched = item.block.task?.scheduleDate {
-                return cal.isDate(sched, inSameDayAs: day)
-            }
-            return true
-        }
-        let remaining = todayTasks.filter {
-            ($0.block.task?.state ?? .pending) == .pending || lingeringTaskIds.contains($0.block.id)
-        }
-        if !todayTasks.isEmpty && remaining.isEmpty {
-            IOSHaptics.shared.taskComplete()
-            celebrationBurstProgress = 0
-            withAnimation(IOSTheme.craftSpring(reduceMotion: reduceMotion)) {
-                showTodayCelebration = true
-            }
-            withAnimation(.easeOut(duration: 0.75)) {
-                celebrationBurstProgress = 1.0
-            }
         }
     }
 }
@@ -440,7 +401,6 @@ struct IOSTaskRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Zero-delay single tap = complete/uncomplete; rapid double-tap (< 0.34s) = red cross-out
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(
@@ -488,12 +448,18 @@ struct IOSTaskRow: View {
                     item.block.content.isEmpty ? "Untitled Task" : item.block.content,
                     isStruck: state != .pending,
                     strikeColor: state == .canceled ? Color.red.opacity(0.85) : .secondary,
-                    font: .system(size: 16),
+                    font: .system(size: 16, weight: .medium),
                     lineLimit: 2,
                     reduceMotion: store.settings.reduceAnimations
                 )
 
                 Spacer(minLength: 6)
+
+                if !(item.block.task?.notes.isEmpty ?? true) {
+                    Image(systemName: "text.alignleft")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
 
                 if let imgs = item.block.task?.attachedImagesBase64, !imgs.isEmpty {
                     HStack(spacing: 3) {
@@ -563,7 +529,7 @@ struct IOSTaskRow: View {
                         updateTaskMeta { $0.scheduleDate = nil; $0.repeatRule = nil }
                     }
                 }
-                Button("Change Deadline…", systemImage: "flag") {
+                Button("Edit Task…", systemImage: "pencil") {
                     onSelectTask?()
                 }
                 Menu("Remind me", systemImage: "alarm") {
@@ -608,11 +574,6 @@ struct IOSTaskRow: View {
                 }
                 Button(state == .canceled ? "Uncancel Task" : "Mark as Cancelled", systemImage: "xmark.square.fill") {
                     triggerCrossOut()
-                }
-            }
-            Section {
-                Button("Open", systemImage: "arrow.right.circle.fill") {
-                    onSelectTask?()
                 }
             }
             Section {
@@ -677,24 +638,52 @@ struct IOSTaskRow: View {
     }
 }
 
-/// Floating Quick Add Card above the keyboard with Undo/Redo, app accent color, tap-safe backdrop, and drag-to-dismiss.
+/// Unified compact floating Task Composer (used for BOTH creating and editing tasks),
+/// with built-in Date, Deadline, Repeat, Reminder, Notes, and Undo/Delete controls.
 struct IOSQuickAddTaskCard: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @Bindable var store: WorkspaceStore
+    let editingItem: ResolvedTaskItem?
     var onClose: () -> Void
 
-    @State private var text: String = ""
-    @State private var scheduleDate: Date
+    @State private var text: String
+    @State private var notes: String
+    @State private var scheduleDate: Date?
+    @State private var deadlineDate: Date?
+    @State private var repeatRule: RepeatRule?
+    @State private var reminderDate: Date?
     @State private var undoStack: [String] = []
     @State private var redoStack: [String] = []
     @State private var isApplyingHistory = false
     @FocusState private var isFocused: Bool
 
-    init(store: WorkspaceStore, initialDate: Date = Calendar.current.startOfDay(for: Date()), onClose: @escaping () -> Void) {
+    init(
+        store: WorkspaceStore,
+        initialDate: Date = Calendar.current.startOfDay(for: Date()),
+        editingItem: ResolvedTaskItem? = nil,
+        onClose: @escaping () -> Void
+    ) {
         self.store = store
-        self._scheduleDate = State(initialValue: Calendar.current.startOfDay(for: initialDate))
+        self.editingItem = editingItem
         self.onClose = onClose
+        if let item = editingItem {
+            self._text = State(initialValue: item.block.content)
+            self._notes = State(initialValue: item.block.task?.notes ?? "")
+            self._scheduleDate = State(initialValue: item.block.task?.scheduleDate)
+            self._deadlineDate = State(initialValue: item.block.task?.deadlineDate)
+            self._repeatRule = State(initialValue: item.block.task?.repeatRule)
+            self._reminderDate = State(initialValue: item.block.task?.reminderDate)
+        } else {
+            self._text = State(initialValue: "")
+            self._notes = State(initialValue: "")
+            self._scheduleDate = State(initialValue: Calendar.current.startOfDay(for: initialDate))
+            self._deadlineDate = State(initialValue: nil)
+            self._repeatRule = State(initialValue: nil)
+            self._reminderDate = State(initialValue: nil)
+        }
     }
+
+    private var isEditing: Bool { editingItem != nil }
 
     private var resolvedAccent: Color {
         let isDark: Bool = switch store.settings.appearanceMode {
@@ -708,23 +697,38 @@ struct IOSQuickAddTaskCard: View {
         return Color(hex: store.settings.accentColor.hex)
     }
 
+    private var dateLabel: String {
+        guard let d = scheduleDate else { return "No Date" }
+        if Calendar.current.isDateInToday(d) { return "Today" }
+        if Calendar.current.isDateInTomorrow(d) { return "Tomorrow" }
+        return d.formatted(.dateTime.month(.abbreviated).day())
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
+            // Top bar: Date selector + Close
             HStack {
                 Menu {
-                    Button("Today") { scheduleDate = Calendar.current.startOfDay(for: Date()) }
-                    Button("Tomorrow") {
-                        scheduleDate = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+                    Button("Today", systemImage: "sun.max") {
+                        scheduleDate = Calendar.current.startOfDay(for: Date())
                     }
-                    Button("Next Week") {
-                        scheduleDate = Calendar.current.date(byAdding: .day, value: 7, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+                    Button("Tomorrow", systemImage: "sunrise") {
+                        scheduleDate = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))
+                    }
+                    Button("Next Week", systemImage: "calendar.badge.plus") {
+                        scheduleDate = Calendar.current.date(byAdding: .day, value: 7, to: Calendar.current.startOfDay(for: Date()))
+                    }
+                    Divider()
+                    Button("No Date", systemImage: "calendar.badge.minus", role: .destructive) {
+                        scheduleDate = nil
+                        repeatRule = nil
                     }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
                             .font(.system(size: 14))
-                            .foregroundStyle(resolvedAccent)
-                        Text(Calendar.current.isDateInToday(scheduleDate) ? "Today" : scheduleDate.formatted(.dateTime.month(.abbreviated).day()))
+                            .foregroundStyle(scheduleDate != nil ? resolvedAccent : .secondary)
+                        Text(dateLabel)
                             .font(.system(size: 15, weight: .medium))
                             .contentTransition(.numericText())
                         Image(systemName: "chevron.down")
@@ -751,63 +755,160 @@ struct IOSQuickAddTaskCard: View {
                 .buttonStyle(RowePressScaleStyle())
             }
 
-            TextField("New task…", text: $text, axis: .vertical)
-                .focused($isFocused)
-                .font(.system(size: 17))
-                .lineLimit(1...4)
-                .submitLabel(.done)
-                .onSubmit { saveAndClose() }
-                .onChange(of: text) { oldValue, newValue in
-                    guard !isApplyingHistory, oldValue != newValue else { return }
-                    undoStack.append(oldValue)
-                    if undoStack.count > 40 { undoStack.removeFirst() }
-                    redoStack.removeAll()
-                }
+            // Title & compact optional Notes
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("New task…", text: $text, axis: .vertical)
+                    .focused($isFocused)
+                    .font(.system(size: 17, weight: .medium))
+                    .lineLimit(1...4)
+                    .submitLabel(.done)
+                    .onSubmit { saveAndClose() }
+                    .onChange(of: text) { oldValue, newValue in
+                        guard !isApplyingHistory, oldValue != newValue else { return }
+                        undoStack.append(oldValue)
+                        if undoStack.count > 40 { undoStack.removeFirst() }
+                        redoStack.removeAll()
+                    }
 
-            HStack(spacing: 12) {
-                Button {
-                    guard let prev = undoStack.popLast() else { return }
-                    IOSHaptics.shared.tap()
-                    isApplyingHistory = true
-                    redoStack.append(text)
-                    text = prev
-                    DispatchQueue.main.async { isApplyingHistory = false }
+                TextField("Add notes…", text: $notes, axis: .vertical)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1...3)
+            }
+
+            // Built-in Deadline, Repeat, Reminder, Undo/Delete & Save row
+            HStack(spacing: 10) {
+                // Deadline picker
+                Menu {
+                    Button("Today", systemImage: "flag") {
+                        deadlineDate = Calendar.current.startOfDay(for: Date())
+                    }
+                    Button("Tomorrow", systemImage: "flag") {
+                        deadlineDate = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))
+                    }
+                    Button("Next Week", systemImage: "flag") {
+                        deadlineDate = Calendar.current.date(byAdding: .day, value: 7, to: Calendar.current.startOfDay(for: Date()))
+                    }
+                    if deadlineDate != nil {
+                        Divider()
+                        Button("Clear Deadline", systemImage: "xmark", role: .destructive) {
+                            deadlineDate = nil
+                        }
+                    }
                 } label: {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(undoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
+                    Image(systemName: deadlineDate != nil ? "flag.fill" : "flag")
+                        .font(.system(size: 14.5, weight: .medium))
+                        .foregroundStyle(deadlineDate != nil ? .orange : .secondary)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle().fill(deadlineDate != nil ? Color.orange.opacity(0.15) : Color.primary.opacity(0.06))
+                        )
                 }
-                .disabled(undoStack.isEmpty)
-                .buttonStyle(RowePressScaleStyle())
 
-                Button {
-                    guard let next = redoStack.popLast() else { return }
-                    IOSHaptics.shared.tap()
-                    isApplyingHistory = true
-                    undoStack.append(text)
-                    text = next
-                    DispatchQueue.main.async { isApplyingHistory = false }
+                // Repeat picker
+                Menu {
+                    Button("None") { repeatRule = nil }
+                    ForEach(RepeatFrequency.allCases, id: \.self) { freq in
+                        Button {
+                            let start = scheduleDate ?? Calendar.current.startOfDay(for: Date())
+                            scheduleDate = start
+                            let weekday = Calendar.current.component(.weekday, from: start)
+                            repeatRule = RepeatRule(frequency: freq, weekdayIndex: freq == .weekly ? weekday : nil, startDate: start)
+                        } label: {
+                            Label(freq.rawValue, systemImage: repeatRule?.frequency == freq ? "checkmark" : "")
+                        }
+                    }
                 } label: {
-                    Image(systemName: "arrow.uturn.forward")
+                    Image(systemName: "repeat")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(redoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Circle())
+                        .foregroundStyle(repeatRule != nil ? resolvedAccent : .secondary)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle().fill(repeatRule != nil ? resolvedAccent.opacity(0.15) : Color.primary.opacity(0.06))
+                        )
                 }
-                .disabled(redoStack.isEmpty)
-                .buttonStyle(RowePressScaleStyle())
 
-                Image(systemName: "checkmark.square")
-                    .foregroundStyle(resolvedAccent)
+                // Reminder picker
+                Menu {
+                    Button("In 1 Hour", systemImage: "clock") {
+                        reminderDate = Date().addingTimeInterval(3600)
+                    }
+                    Button("Tonight (6:00 PM)", systemImage: "moon") {
+                        reminderDate = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
+                    }
+                    Button("Tomorrow (9:00 AM)", systemImage: "sunrise") {
+                        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+                        reminderDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+                    }
+                    if reminderDate != nil {
+                        Divider()
+                        Button("Clear Reminder", systemImage: "bell.slash", role: .destructive) {
+                            reminderDate = nil
+                        }
+                    }
+                } label: {
+                    Image(systemName: reminderDate != nil ? "alarm.fill" : "alarm")
+                        .font(.system(size: 14.5, weight: .medium))
+                        .foregroundStyle(reminderDate != nil ? resolvedAccent : .secondary)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle().fill(reminderDate != nil ? resolvedAccent.opacity(0.15) : Color.primary.opacity(0.06))
+                        )
+                }
+
+                if isEditing, let item = editingItem {
+                    Button(role: .destructive) {
+                        IOSHaptics.shared.errorBuzz()
+                        store.deleteBlock(in: item.documentId, blockId: item.block.id)
+                        onClose()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.red)
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(Color.red.opacity(0.10)))
+                    }
+                    .buttonStyle(RowePressScaleStyle())
+                } else {
+                    Button {
+                        guard let prev = undoStack.popLast() else { return }
+                        IOSHaptics.shared.tap()
+                        isApplyingHistory = true
+                        redoStack.append(text)
+                        text = prev
+                        DispatchQueue.main.async { isApplyingHistory = false }
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(undoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
+                            .frame(width: 28, height: 28)
+                    }
+                    .disabled(undoStack.isEmpty)
+                    .buttonStyle(RowePressScaleStyle())
+
+                    Button {
+                        guard let next = redoStack.popLast() else { return }
+                        IOSHaptics.shared.tap()
+                        isApplyingHistory = true
+                        undoStack.append(text)
+                        text = next
+                        DispatchQueue.main.async { isApplyingHistory = false }
+                    } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                            .font(.system(size: 13.5, weight: .medium))
+                            .foregroundStyle(redoStack.isEmpty ? Color.secondary.opacity(0.35) : .primary)
+                            .frame(width: 28, height: 28)
+                    }
+                    .disabled(redoStack.isEmpty)
+                    .buttonStyle(RowePressScaleStyle())
+                }
 
                 Spacer()
 
                 Button {
                     saveAndClose()
                 } label: {
-                    Text("Add")
+                    Text(isEditing ? "Done" : "Add")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(store.settings.accentColor == .graphite ? Color(uiColor: .systemBackground) : .white)
                         .padding(.horizontal, 20)
@@ -834,8 +935,34 @@ struct IOSQuickAddTaskCard: View {
     private func saveAndClose() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         IOSHaptics.shared.taskComplete()
-        _ = store.addInboxTask(title: trimmed, scheduleDate: scheduleDate)
+
+        if let item = editingItem {
+            store.updateBlock(in: item.documentId, blockId: item.block.id) { block in
+                block.content = trimmed
+                var meta = block.task ?? TaskMetadata(isInbox: item.isInbox)
+                meta.notes = trimmedNotes
+                meta.scheduleDate = scheduleDate
+                meta.deadlineDate = deadlineDate
+                meta.repeatRule = repeatRule
+                meta.reminderDate = reminderDate
+                block.task = meta
+            }
+        } else {
+            let created = store.addInboxTask(
+                title: trimmed,
+                scheduleDate: scheduleDate,
+                deadlineDate: deadlineDate,
+                repeatRule: repeatRule
+            )
+            if !trimmedNotes.isEmpty || reminderDate != nil {
+                store.updateBlock(in: created.documentId, blockId: created.block.id) { block in
+                    block.task?.notes = trimmedNotes
+                    block.task?.reminderDate = reminderDate
+                }
+            }
+        }
         onClose()
     }
 }

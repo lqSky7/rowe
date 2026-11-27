@@ -187,12 +187,20 @@ struct IOSAllDocsView: View {
                 .padding(.horizontal, 18)
 
                 if filteredDocs.isEmpty {
-                    ContentUnavailableView(
-                        isTrashMode ? "Trash is Empty" : "No Documents",
-                        systemImage: isTrashMode ? "trash" : "doc.text",
-                        description: Text(isTrashMode ? "Deleted documents appear here." : "Tap + to create a new document.")
-                    )
-                    .padding(.top, 60)
+                    VStack(spacing: 14) {
+                        RoweEmptyStateArtwork(
+                            kind: isTrashMode ? .trashEmpty : .documents,
+                            accent: Color(hex: store.settings.accentColor.hex),
+                            size: 96
+                        )
+                        Text(isTrashMode ? "Trash is Empty" : "No Documents")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        Text(isTrashMode ? "Deleted documents appear here." : "Tap + to create a new document.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 56)
                 } else {
                     ForEach(groupedDocs, id: \.0) { sectionTitle, docs in
                         VStack(alignment: .leading, spacing: 12) {

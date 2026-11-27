@@ -47,6 +47,7 @@ struct IOSRootShellView: View {
     @State private var calendarPath: [IOSRoute] = []
     @State private var showQuickAddSheet = false
     @State private var quickAddDefaultDate: Date = Calendar.current.startOfDay(for: Date())
+    @State private var editingTaskItem: ResolvedTaskItem? = nil
     @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: "rowe.hasCompletedOnboarding")
 
     private var preferredScheme: ColorScheme? {
@@ -97,7 +98,15 @@ struct IOSRootShellView: View {
                 hidesTabBar: shouldHideBottomControls,
                 resolvedAccent: resolvedAccent,
                 onOpenQuickAdd: { targetDate in
+                    editingTaskItem = nil
                     quickAddDefaultDate = Calendar.current.startOfDay(for: targetDate ?? Date())
+                    withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
+                        showQuickAddSheet = true
+                    }
+                },
+                onEditTask: { item in
+                    editingTaskItem = item
+                    quickAddDefaultDate = item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: Date())
                     withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                         showQuickAddSheet = true
                     }
@@ -111,6 +120,7 @@ struct IOSRootShellView: View {
                 IOSGlassCircleButton(systemImage: "plus", size: 56, iconSize: 22) {
                     IOSKeyboard.dismiss()
                     if selectedTab == .calendar || selectedTab == .tasks {
+                        editingTaskItem = nil
                         quickAddDefaultDate = Calendar.current.startOfDay(for: Date())
                         withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                             showQuickAddSheet = true
@@ -121,12 +131,12 @@ struct IOSRootShellView: View {
                     }
                 }
                 .padding(.trailing, 18)
-                .padding(.bottom, 12)
+                .padding(.bottom, 17)
                 .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            // Floating Quick Add Card above keyboard
+            // Unified Floating Task Composer (Create & Edit) above keyboard
             if showQuickAddSheet {
                 Color.black.opacity(0.35)
                     .ignoresSafeArea()
@@ -134,15 +144,22 @@ struct IOSRootShellView: View {
                         IOSKeyboard.dismiss()
                         withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                             showQuickAddSheet = false
+                            editingTaskItem = nil
                         }
                     }
 
-                IOSQuickAddTaskCard(store: store, initialDate: quickAddDefaultDate) {
+                IOSQuickAddTaskCard(
+                    store: store,
+                    initialDate: quickAddDefaultDate,
+                    editingItem: editingTaskItem
+                ) {
                     IOSKeyboard.dismiss()
                     withAnimation(IOSTheme.craftSpring(reduceMotion: store.settings.reduceAnimations)) {
                         showQuickAddSheet = false
+                        editingTaskItem = nil
                     }
                 }
+                .id(editingTaskItem?.id ?? "create-new-task")
                 .padding(.horizontal, 14)
                 .padding(.bottom, 12)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -273,6 +290,7 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
     let hidesTabBar: Bool
     let resolvedAccent: Color
     let onOpenQuickAdd: (Date?) -> Void
+    let onEditTask: (ResolvedTaskItem) -> Void
     let onReplayOnboarding: () -> Void
 
     @Namespace private var homeZoomNS
@@ -349,7 +367,8 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
                 mode: .allTasks,
                 zoomNamespace: tasksZoomNS,
                 onOpenSettings: { tasksPath.append(.settings) },
-                onOpenQuickAdd: onOpenQuickAdd
+                onOpenQuickAdd: onOpenQuickAdd,
+                onEditTask: onEditTask
             )
             .navigationDestination(for: IOSRoute.self) { route in
                 destinationView(for: route, path: $tasksPath, zoomNS: tasksZoomNS)
@@ -365,7 +384,8 @@ private struct CompactTabBarContainer: UIViewControllerRepresentable {
                 mode: .calendar,
                 zoomNamespace: calendarZoomNS,
                 onOpenSettings: { calendarPath.append(.settings) },
-                onOpenQuickAdd: onOpenQuickAdd
+                onOpenQuickAdd: onOpenQuickAdd,
+                onEditTask: onEditTask
             )
             .navigationDestination(for: IOSRoute.self) { route in
                 destinationView(for: route, path: $calendarPath, zoomNS: calendarZoomNS)
@@ -434,7 +454,22 @@ private struct IOSSharedPlaceholderView: View {
     var body: some View {
         List {
             if store.sharedDocuments.isEmpty {
-                ContentUnavailableView("No Shared Docs", systemImage: "person.2.wave.2")
+                VStack(spacing: 14) {
+                    RoweEmptyStateArtwork(
+                        kind: .sharedSpace,
+                        accent: Color(hex: store.settings.accentColor.hex),
+                        size: 92
+                    )
+                    Text("No Shared Docs")
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    Text("Documents shared with your space will appear here.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 48)
+                .listRowBackground(Color.clear)
             } else {
                 ForEach(store.sharedDocuments) { item in
                     VStack(alignment: .leading, spacing: 4) {

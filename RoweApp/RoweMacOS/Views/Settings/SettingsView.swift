@@ -43,7 +43,7 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             settingsSidebar
                 .frame(width: 220)
-                .background(.ultraThinMaterial)
+                .background(MacSidebarBackdrop())
 
             Divider().opacity(0.35)
 
@@ -278,6 +278,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var appearanceBody: some View {
+        HStack(spacing: 16) {
+            RoweGlassGlowArtworkView(kind: .documents, size: 54, speed: 0.72, glow: 1.05)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Appearance & Craft")
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                Text("Customize theme, accent color, sound, and tactile document feel.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.05)))
+
         HStack(spacing: 18) {
             ForEach(AppearanceMode.allCases, id: \.self) { mode in
                 let isSelected = store.settings.appearanceMode == mode
@@ -681,7 +695,8 @@ struct SettingsView: View {
                     .onChange(of: editedBio) { _, val in store.updateProfile(bio: val) }
             }
             Divider().opacity(0.25)
-            HStack {
+            HStack(spacing: 14) {
+                RoweGlassGlowArtworkView(kind: .syncOrbit, size: 46, speed: 0.72, glow: 1.0)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Cloud Sync Account")
                         .font(.system(size: 11.5))
@@ -723,7 +738,8 @@ struct SettingsView: View {
             Text("Locked Notes (Zero-Knowledge PIN)")
                 .font(.system(size: 13, weight: .semibold))
             settingsCard {
-                HStack {
+                HStack(spacing: 14) {
+                    RoweGlassGlowArtworkView(kind: .vaultLock, size: 46, speed: 0.72, glow: 1.0)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(store.hasVaultPin ? "PIN Lock Enabled (\(store.vaultEnvelope?.pinLength ?? 6)-Digit)" : "No Lock PIN Set")
                             .font(.system(size: 13, weight: .medium))
