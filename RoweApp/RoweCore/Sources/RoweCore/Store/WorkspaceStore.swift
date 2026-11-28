@@ -1281,7 +1281,8 @@ public final class WorkspaceStore {
             }
             collect(doc.blocks)
         }
-        return result
+        // Canonical total order guarantees identical task ordering across macOS and iOS
+        return result.sorted { Block.canonicalTaskOrderComparator($0.block, $1.block) }
     }
 
     public func setTaskState(docId: String, blockId: String, state: TaskCompletionState) {
@@ -1309,6 +1310,9 @@ public final class WorkspaceStore {
         } else {
             inboxDoc = createDocument(title: "Tasks Inbox", folderId: folders.first?.id, openImmediately: false)
         }
+        let now = Date()
+        let maxExistingOrder = inboxDoc.blocks.filter(\.isTaskOrTombstone).map(\.effectiveSortOrder).max()
+        let nextSortOrder = max(now.timeIntervalSince1970, (maxExistingOrder ?? (now.timeIntervalSince1970 - 1.0)) + 1.0)
         let block = Block(
             documentId: inboxDoc.id,
             content: title,
@@ -1320,7 +1324,9 @@ public final class WorkspaceStore {
                 repeatRule: repeatRule,
                 isInbox: true,
                 attachedImagesBase64: attachedImagesBase64
-            )
+            ),
+            updatedAt: now,
+            sortOrder: nextSortOrder
         )
         mutateBlocks(in: inboxDoc.id) { blocks in
             blocks.append(block)
@@ -1396,19 +1402,52 @@ public final class WorkspaceStore {
             return
         }
 
+        let cal = Calendar.current
+        let normalizedDay = cal.startOfDay(for: targetDay)
+        let isToday = cal.isDateInToday(normalizedDay)
+        let dayPeers = allTasks().filter { item in
+            guard item.block.id != sourceBlockId else { return false }
+            if let sched = item.block.task?.scheduleDate {
+                return cal.isDate(sched, inSameDayAs: normalizedDay)
+            }
+            return isToday
+        }
+
+        // Compute fractional CRDT sortOrder midpoint so reordering syncs identically across devices
+        let newSortOrder: Double
+        if let targetBlockId, sourceBlockId != targetBlockId,
+           let tIdx = dayPeers.firstIndex(where: { $0.block.id == targetBlockId }) {
+            if tIdx == 0 {
+                newSortOrder = dayPeers[0].block.effectiveSortOrder - 1024.0
+            } else {
+                let prevOrder = dayPeers[tIdx - 1].block.effectiveSortOrder
+                let nextOrder = dayPeers[tIdx].block.effectiveSortOrder
+                newSortOrder = (prevOrder + nextOrder) / 2.0
+            }
+        } else if let lastPeer = dayPeers.last {
+            newSortOrder = lastPeer.block.effectiveSortOrder + 1024.0
+        } else {
+            newSortOrder = Date().timeIntervalSince1970
+        }
+
+        let now = Date()
         var block = documents[sourceDocIdx].blocks[sourceBlockIdx]
         var meta = block.task ?? TaskMetadata(state: .pending, isInbox: documents[sourceDocIdx].title == "Tasks Inbox")
-        meta.scheduleDate = Calendar.current.startOfDay(for: targetDay)
+        meta.scheduleDate = normalizedDay
         block.task = meta
+        block.sortOrder = newSortOrder
+        block.updatedAt = now
         documents[sourceDocIdx].blocks[sourceBlockIdx] = block
 
-        if let targetBlockId, sourceBlockId != targetBlockId,
-           let targetBlockIdx = documents[sourceDocIdx].blocks.firstIndex(where: { $0.id == targetBlockId }) {
+        if documents[sourceDocIdx].title == "Tasks Inbox" {
+            documents[sourceDocIdx].blocks.sort(by: Block.canonicalTaskOrderComparator)
+        } else if let targetBlockId, sourceBlockId != targetBlockId,
+                  let targetBlockIdx = documents[sourceDocIdx].blocks.firstIndex(where: { $0.id == targetBlockId }) {
             let moved = documents[sourceDocIdx].blocks.remove(at: sourceBlockIdx)
             documents[sourceDocIdx].blocks.insert(moved, at: min(targetBlockIdx, documents[sourceDocIdx].blocks.count))
         }
 
-        documents[sourceDocIdx].updatedAt = Date()
+        documents[sourceDocIdx].updatedAt = now
         persistAndReindex(documents[sourceDocIdx], fastSync: true)
         onTaskMutatedForLiveSync?(block.content.isEmpty ? "Task rescheduled" : block.content)
     }
@@ -2050,7 +2089,7 @@ public final class WorkspaceStore {
 
             // Step 1: Pull delta first so tombstones and concurrent edits on another device are applied safely
             let previousWatermark = lastSyncServerTimeMs
-            let tasksBeforePull = Dictionary(allTasks().map { ($0.block.id, Self.taskSyncFingerprint(for: $0.block)) }, uniquingKeysWith: { first, _ in first })
+            let tasksBeforePull = allTasks().map(\.block)
             let pulled = try await withAuthorizedSession { sess in
                 try await self.backendClient.syncPull(serverURL: sess.serverURL, accessToken: sess.accessToken, sinceMs: sinceWatermark)
             }
@@ -2062,21 +2101,10 @@ public final class WorkspaceStore {
                 syncPulseId = UUID()
                 rebuildSearchIndex()
                 if !forceFullPull && previousWatermark > 0 {
-                    let afterTasks = Dictionary(allTasks().map { ($0.block.id, Self.taskSyncFingerprint(for: $0.block)) }, uniquingKeysWith: { first, _ in first })
-                    var addedOrUpdatedTaskIds: Set<String> = []
-                    for (id, afterFP) in afterTasks {
-                        if let beforeFP = tasksBeforePull[id] {
-                            if beforeFP != afterFP {
-                                addedOrUpdatedTaskIds.insert(id)
-                            }
-                        } else {
-                            addedOrUpdatedTaskIds.insert(id)
-                        }
-                    }
-                    let deletedTaskIds = Set(tasksBeforePull.keys).subtracting(afterTasks.keys)
-                    // Play downsync wave ONLY when tasks were added, updated, or deleted (never for non-task changes)
-                    if !addedOrUpdatedTaskIds.isEmpty || !deletedTaskIds.isEmpty {
-                        downsyncedTaskIds = addedOrUpdatedTaskIds
+                    let delta = Self.computeTaskSyncDelta(before: tasksBeforePull, after: allTasks().map(\.block))
+                    // Play downsync wave ONLY when tasks were added, updated, reordered, or deleted (never for non-task changes)
+                    if !delta.addedOrUpdated.isEmpty || !delta.deleted.isEmpty {
+                        downsyncedTaskIds = delta.addedOrUpdated
                         downsyncWaveId = UUID()
                     }
                 }
@@ -2146,13 +2174,31 @@ public final class WorkspaceStore {
         }
     }
 
-    private static func taskSyncFingerprint(for block: Block) -> String {
+    public static func taskSyncFingerprint(for block: Block) -> String {
         let state = block.task?.state.rawValue ?? 0
         let sched = block.task?.scheduleDate.map { String(Int($0.timeIntervalSince1970)) } ?? "none"
         let repeatFreq = block.task?.repeatRule?.frequency.rawValue ?? "none"
         let imgCount = block.task?.attachedImagesBase64.count ?? 0
         let notes = block.task?.notes ?? ""
-        return "\(block.content)|\(state)|\(sched)|\(repeatFreq)|\(imgCount)|\(notes)"
+        let order = block.sortOrder.map { String(format: "%.6f", $0) } ?? "nil"
+        return "\(block.content)|\(state)|\(sched)|\(repeatFreq)|\(imgCount)|\(notes)|\(order)"
+    }
+
+    public static func computeTaskSyncDelta(before: [Block], after: [Block]) -> (addedOrUpdated: Set<String>, deleted: Set<String>) {
+        let beforeMap = Dictionary(before.filter(\.isTask).map { ($0.id, taskSyncFingerprint(for: $0)) }, uniquingKeysWith: { first, _ in first })
+        let afterMap = Dictionary(after.filter(\.isTask).map { ($0.id, taskSyncFingerprint(for: $0)) }, uniquingKeysWith: { first, _ in first })
+        var addedOrUpdated: Set<String> = []
+        for (id, afterFP) in afterMap {
+            if let beforeFP = beforeMap[id] {
+                if beforeFP != afterFP {
+                    addedOrUpdated.insert(id)
+                }
+            } else {
+                addedOrUpdated.insert(id)
+            }
+        }
+        let deleted = Set(beforeMap.keys).subtracting(afterMap.keys)
+        return (addedOrUpdated, deleted)
     }
 
     private func mergeRemoteDocuments(_ remoteDocs: [SyncDocumentDTO], localDirtyIds: Set<String>) {
@@ -2268,13 +2314,12 @@ public final class WorkspaceStore {
     /// - Resolves same-ID blocks by newest `updatedAt` (with deterministic tombstone/state tie-breaker).
     /// - Preserves unique blocks created on either device so offline tasks are never overwritten.
     /// - Garbage-collects tombstones older than 30 days.
-    private static func mergeTaskBlocksCRDT(local: [Block], remote: [Block], documentId: String) -> [Block] {
+    public static func mergeTaskBlocksCRDT(local: [Block], remote: [Block], documentId: String, now: Date = Date()) -> [Block] {
         var byId: [String: Block] = [:]
-        var orderedIds: [String] = []
 
         func pickWinner(_ a: Block, _ b: Block) -> Block {
             let delta = a.updatedAt.timeIntervalSince(b.updatedAt)
-            if abs(delta) > 0.001 {
+            if abs(delta) > 1e-6 {
                 return delta > 0 ? a : b
             }
             if (a.deletedAt != nil) != (b.deletedAt != nil) {
@@ -2285,6 +2330,9 @@ public final class WorkspaceStore {
             if aState != bState {
                 return aState > bState ? a : b
             }
+            if let sa = a.sortOrder, let sb = b.sortOrder, abs(sa - sb) > 1e-9 {
+                return sa < sb ? a : b
+            }
             return a.content >= b.content ? a : b
         }
 
@@ -2294,7 +2342,6 @@ public final class WorkspaceStore {
                 byId[blk.id] = pickWinner(existing, blk)
             } else {
                 byId[blk.id] = blk
-                orderedIds.append(blk.id)
             }
         }
         for var blk in remote {
@@ -2303,16 +2350,15 @@ public final class WorkspaceStore {
                 byId[blk.id] = pickWinner(existing, blk)
             } else {
                 byId[blk.id] = blk
-                orderedIds.append(blk.id)
             }
         }
 
-        let tombstoneCutoff = Date().addingTimeInterval(-30 * 86400)
-        return orderedIds.compactMap { id in
-            guard let blk = byId[id] else { return nil }
-            if let del = blk.deletedAt, del < tombstoneCutoff { return nil }
-            return blk
+        let tombstoneCutoff = now.addingTimeInterval(-30 * 86400)
+        let surviving = byId.values.filter { blk in
+            if let del = blk.deletedAt, del < tombstoneCutoff { return false }
+            return true
         }
+        return surviving.sorted(by: Block.canonicalTaskOrderComparator)
     }
 
     /// Merges duplicate "Tasks Inbox" AND any legacy "Tasks Inbox (Sync Conflict)" documents via CRDT
@@ -2321,7 +2367,7 @@ public final class WorkspaceStore {
         let inboxIndices = documents.indices.filter {
             !documents[$0].isTrashed && (documents[$0].title == "Tasks Inbox" || documents[$0].title.hasPrefix("Tasks Inbox (Sync Conflict)"))
         }
-        if !inboxIndices.isEmpty {
+        if inboxIndices.count > 1 {
             let canonicalIdx = inboxIndices.first(where: { documents[$0].id == "rowe-seed-inbox" })
                 ?? inboxIndices.first(where: { documents[$0].title == "Tasks Inbox" })
                 ?? inboxIndices[0]
@@ -2335,22 +2381,17 @@ public final class WorkspaceStore {
             }
 
             let deduped = deduplicatedTaskBlocks(mergedBlocks, documentId: canonicalId)
-            let changed = !duplicateIdsToRemove.isEmpty || deduped != documents[canonicalIdx].blocks
-            if changed {
-                documents[canonicalIdx].title = "Tasks Inbox"
-                documents[canonicalIdx].blocks = deduped
-                documents[canonicalIdx].updatedAt = Date()
-                if !duplicateIdsToRemove.isEmpty {
-                    let removeSet = Set(duplicateIdsToRemove)
-                    documents.removeAll(where: { removeSet.contains($0.id) })
-                    dirtyDocumentIds.insert(canonicalId)
-                    dirtyDocumentVersions[canonicalId, default: 0] &+= 1
-                    if authSession != nil {
-                        for dupId in duplicateIdsToRemove {
-                            pendingRemoteDeleteIds.insert(dupId)
-                            Task { await deleteRemoteDocument(docId: dupId) }
-                        }
-                    }
+            documents[canonicalIdx].title = "Tasks Inbox"
+            documents[canonicalIdx].blocks = deduped
+            documents[canonicalIdx].updatedAt = Date()
+            let removeSet = Set(duplicateIdsToRemove)
+            documents.removeAll(where: { removeSet.contains($0.id) })
+            dirtyDocumentIds.insert(canonicalId)
+            dirtyDocumentVersions[canonicalId, default: 0] &+= 1
+            if authSession != nil {
+                for dupId in duplicateIdsToRemove {
+                    pendingRemoteDeleteIds.insert(dupId)
+                    Task { await deleteRemoteDocument(docId: dupId) }
                 }
             }
         }
@@ -2791,6 +2832,9 @@ public final class WorkspaceStore {
     private static func mutateBlockRecursive(in blocks: inout [Block], id: String, _ mutate: (inout Block) -> Void) -> Bool {
         for idx in blocks.indices {
             if blocks[idx].id == id {
+                if blocks[idx].isTaskOrTombstone && blocks[idx].sortOrder == nil {
+                    blocks[idx].sortOrder = blocks[idx].updatedAt.timeIntervalSince1970
+                }
                 mutate(&blocks[idx])
                 blocks[idx].updatedAt = Date()
                 return true

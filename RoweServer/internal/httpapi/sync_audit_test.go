@@ -13,6 +13,7 @@ import (
 	"rowe-server/internal/config"
 	"rowe-server/internal/httpapi"
 	"rowe-server/internal/middleware"
+	"rowe-server/internal/model"
 	"rowe-server/internal/store"
 )
 
@@ -75,13 +76,13 @@ func TestSyncPushMultiDocBatchAndDeleteTombstonePropagation(t *testing.T) {
 	beforeDelete := pushBody.ServerTime
 	time.Sleep(5 * time.Millisecond)
 
-	delRes := doJSON(t, handler, http.MethodDelete, "/api/v1/sync/documents/doc-batch-c", token, nil)
+	delRes := doJSON(t, handler, http.MethodDelete, "/api/v1/documents/doc-batch-c", token, nil)
 	if delRes.Code != http.StatusOK {
 		t.Fatalf("delete doc expected 200, got %d: %s", delRes.Code, delRes.Body.String())
 	}
 
 	// Idempotent second delete succeeds cleanly
-	delRes2 := doJSON(t, handler, http.MethodDelete, "/api/v1/sync/documents/doc-batch-c", token, nil)
+	delRes2 := doJSON(t, handler, http.MethodDelete, "/api/v1/documents/doc-batch-c", token, nil)
 	if delRes2.Code != http.StatusOK {
 		t.Fatalf("idempotent delete expected 200, got %d", delRes2.Code)
 	}
@@ -172,8 +173,8 @@ func TestEventHubMultiDocBroadcastAndBackpressure(t *testing.T) {
 }
 
 func TestRateLimiterBlocksBurstAndAllowsNormalTraffic(t *testing.T) {
-	rl := middleware.NewRateLimiter(3, time.Minute)
-	okHandler := rl.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rl := middleware.NewRateLimiter(3)
+	okHandler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -205,7 +206,7 @@ func TestSQLiteUpsertDocumentsBatchAtomicAndExpiredRefreshCleanup(t *testing.T) 
 	defer func() { _ = st.Close() }()
 
 	ctx := context.Background()
-	user := store.User{
+	user := &model.User{
 		ID:           "u-atomic",
 		Email:        "atomic@rowe.app",
 		PasswordHash: "hash",
@@ -217,7 +218,7 @@ func TestSQLiteUpsertDocumentsBatchAtomicAndExpiredRefreshCleanup(t *testing.T) 
 	}
 
 	now := time.Now().UTC()
-	docs := []store.Document{
+	docs := []model.SyncDocument{
 		{ID: "d1", UserID: user.ID, SpaceID: "s1", Title: "One", PayloadJSON: "[]", UpdatedAt: now},
 		{ID: "d2", UserID: user.ID, SpaceID: "s1", Title: "Two", PayloadJSON: "[]", UpdatedAt: now},
 	}
@@ -230,31 +231,33 @@ func TestSQLiteUpsertDocumentsBatchAtomicAndExpiredRefreshCleanup(t *testing.T) 
 	}
 
 	// Verify expired refresh sessions are pruned when creating a new refresh session
-	expired := store.RefreshSession{
+	expired := &model.RefreshSession{
+		ID:        "sess-expired",
 		TokenHash: "expired-hash",
 		UserID:    user.ID,
 		Device:    "OldPhone",
 		ExpiresAt: time.Now().UTC().Add(-2 * time.Hour),
 		CreatedAt: time.Now().UTC().Add(-48 * time.Hour),
 	}
-	if err := st.SaveRefreshSession(ctx, expired); err != nil {
+	if err := st.CreateRefreshSession(ctx, expired); err != nil {
 		t.Fatalf("save expired session: %v", err)
 	}
-	fresh := store.RefreshSession{
+	fresh := &model.RefreshSession{
+		ID:        "sess-fresh",
 		TokenHash: "fresh-hash",
 		UserID:    user.ID,
 		Device:    "NewMac",
 		ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := st.SaveRefreshSession(ctx, fresh); err != nil {
+	if err := st.CreateRefreshSession(ctx, fresh); err != nil {
 		t.Fatalf("save fresh session: %v", err)
 	}
 
-	if _, err := st.GetRefreshSession(ctx, "expired-hash"); err == nil {
+	if _, err := st.GetRefreshSessionByHash(ctx, "expired-hash"); err == nil {
 		t.Fatalf("expected expired refresh session to be pruned")
 	}
-	if _, err := st.GetRefreshSession(ctx, "fresh-hash"); err != nil {
+	if _, err := st.GetRefreshSessionByHash(ctx, "fresh-hash"); err != nil {
 		t.Fatalf("expected fresh refresh session to remain valid: %v", err)
 	}
 }
