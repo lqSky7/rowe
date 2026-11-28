@@ -167,11 +167,13 @@ struct CraftWindowShell: View {
                 // Optical Metal Liquid Glass Bubble flight overlay (matching iOS behavior)
                 MacTaskBubbleFlightOverlay(coordinator: taskFlightCoordinator)
 
-                // Top-to-bottom optical downsync shockwave + gradual dim (excluding newly synced tasks)
-                MacDownsyncWaveOverlay(
-                    waveCoordinator: downsyncWaveCoordinator,
-                    flightCoordinator: taskFlightCoordinator
-                )
+                // Calendar-page-only full-rainbow sync wave (zero ghosting, never shown on other pages)
+                if store.currentDestination == .calendar && !showOnboarding {
+                    MacDownsyncWaveOverlay(
+                        waveCoordinator: downsyncWaveCoordinator,
+                        flightCoordinator: taskFlightCoordinator
+                    )
+                }
 
                 if store.isLoginSheetPresented {
                     Color.black.opacity(0.28)
@@ -225,7 +227,7 @@ struct CraftWindowShell: View {
         .onChange(of: store.activeTaskEditor) { _, newReq in
             if case .edit(let item) = newReq {
                 taskFlightCoordinator.activeEditingBlockId = item.block.id
-            } else if taskFlightCoordinator.activeFlight?.direction != .openForEdit {
+            } else {
                 taskFlightCoordinator.clearEditingState()
             }
         }
@@ -247,8 +249,15 @@ struct CraftWindowShell: View {
                 showOnboarding = !completed
             }
         }
+        .onChange(of: store.currentDestination) { _, dest in
+            if dest != .calendar {
+                downsyncWaveCoordinator.reset()
+            }
+        }
         .onChange(of: store.manualSyncWaveId) { _, _ in
             guard store.isSignedIn,
+                  store.currentDestination == .calendar,
+                  !showOnboarding,
                   !store.settings.reduceAnimations,
                   store.settings.crazySyncAnimation,
                   taskFlightCoordinator.activeFlight == nil else { return }
@@ -260,7 +269,9 @@ struct CraftWindowShell: View {
             }
         }
         .onChange(of: store.downsyncWaveId) { _, _ in
-            guard !store.settings.reduceAnimations,
+            guard store.currentDestination == .calendar,
+                  !showOnboarding,
+                  !store.settings.reduceAnimations,
                   store.settings.crazySyncAnimation else { return }
             downsyncWaveCoordinator.trigger(
                 taskIds: store.downsyncedTaskIds,

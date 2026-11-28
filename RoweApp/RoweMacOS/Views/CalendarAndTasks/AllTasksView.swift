@@ -2,6 +2,7 @@ import SwiftUI
 import RoweCore
 
 struct AllTasksView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
     @State private var scope: TaskScopeFilter = .active
     @State private var quickTaskText: String = ""
@@ -82,7 +83,10 @@ struct AllTasksView: View {
                         ForEach(filteredTasks) { item in
                             let state = item.block.task?.state ?? .pending
                             HStack(spacing: 10) {
-                                TaskCheckboxControl(state: state) { newState in
+                                TaskCheckboxControl(
+                                    state: state,
+                                    prefersDarkCheckmark: store.settings.accentColor.prefersDarkForeground(isDark: colorScheme == .dark)
+                                ) { newState in
                                     handleTaskStateChange(item: item, newState: newState)
                                 }
 

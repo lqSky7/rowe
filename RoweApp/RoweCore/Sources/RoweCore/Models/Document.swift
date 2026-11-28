@@ -405,6 +405,8 @@ public struct RoweDocument: Identifiable, Codable, Hashable, Sendable {
     public var isStarred: Bool
     public var isDailyNote: Bool
     public var dailyNoteDateKey: String?
+    public var isTaskDayDocument: Bool
+    public var taskDayDateKey: String?
     public var isTrashed: Bool
     public var isLocked: Bool
     public var encryptedPayload: String?
@@ -413,6 +415,18 @@ public struct RoweDocument: Identifiable, Codable, Hashable, Sendable {
     public var updatedAt: Date
     public var lastViewedAt: Date
     public var publishedURL: String?
+
+    /// Deterministic document ID prefix for hidden per-day calendar task documents.
+    public static let taskDayDocumentIdPrefix = "tasks-day-"
+
+    /// Returns true if this document is an internal hidden task container (per-day task doc or legacy Tasks Inbox)
+    /// that must not appear in All Docs, Home, Folders, Sidebar, Trash, or Quick Open search.
+    public var isHiddenTaskDocument: Bool {
+        isTaskDayDocument
+            || id.hasPrefix(Self.taskDayDocumentIdPrefix)
+            || title == "Tasks Inbox"
+            || title.hasPrefix("Tasks Inbox (Sync Conflict)")
+    }
 
     public init(
         id: String = UUID().uuidString,
@@ -425,6 +439,8 @@ public struct RoweDocument: Identifiable, Codable, Hashable, Sendable {
         isStarred: Bool = false,
         isDailyNote: Bool = false,
         dailyNoteDateKey: String? = nil,
+        isTaskDayDocument: Bool = false,
+        taskDayDateKey: String? = nil,
         isTrashed: Bool = false,
         isLocked: Bool = false,
         encryptedPayload: String? = nil,
@@ -444,6 +460,8 @@ public struct RoweDocument: Identifiable, Codable, Hashable, Sendable {
         self.isStarred = isStarred
         self.isDailyNote = isDailyNote
         self.dailyNoteDateKey = dailyNoteDateKey
+        self.isTaskDayDocument = isTaskDayDocument || id.hasPrefix(Self.taskDayDocumentIdPrefix)
+        self.taskDayDateKey = taskDayDateKey ?? (id.hasPrefix(Self.taskDayDocumentIdPrefix) ? String(id.dropFirst(Self.taskDayDocumentIdPrefix.count)) : nil)
         self.isTrashed = isTrashed
         self.isLocked = isLocked
         self.encryptedPayload = encryptedPayload
@@ -456,6 +474,7 @@ public struct RoweDocument: Identifiable, Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, spaceId, folderId, title, blocks, style, tags, isStarred, isDailyNote, dailyNoteDateKey
+        case isTaskDayDocument, taskDayDateKey
         case isTrashed, isLocked, encryptedPayload, authorName, createdAt, updatedAt, lastViewedAt, publishedURL
     }
 
@@ -471,6 +490,10 @@ public struct RoweDocument: Identifiable, Codable, Hashable, Sendable {
         isStarred = try c.decodeIfPresent(Bool.self, forKey: .isStarred) ?? false
         isDailyNote = try c.decodeIfPresent(Bool.self, forKey: .isDailyNote) ?? false
         dailyNoteDateKey = try c.decodeIfPresent(String.self, forKey: .dailyNoteDateKey)
+        let decodedTaskDay = try c.decodeIfPresent(Bool.self, forKey: .isTaskDayDocument) ?? false
+        isTaskDayDocument = decodedTaskDay || id.hasPrefix(Self.taskDayDocumentIdPrefix)
+        taskDayDateKey = try c.decodeIfPresent(String.self, forKey: .taskDayDateKey)
+            ?? (id.hasPrefix(Self.taskDayDocumentIdPrefix) ? String(id.dropFirst(Self.taskDayDocumentIdPrefix.count)) : nil)
         isTrashed = try c.decodeIfPresent(Bool.self, forKey: .isTrashed) ?? false
         isLocked = try c.decodeIfPresent(Bool.self, forKey: .isLocked) ?? false
         encryptedPayload = try c.decodeIfPresent(String.self, forKey: .encryptedPayload)

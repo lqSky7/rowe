@@ -110,6 +110,10 @@ struct IOSRootShellView: View {
         isInsideDocument || isInsideSettings
     }
 
+    private var isCalendarPageOpen: Bool {
+        selectedTab == .calendar && calendarPath.isEmpty && !showOnboarding
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             CompactTabBarContainer(
@@ -125,7 +129,7 @@ struct IOSRootShellView: View {
                 onOpenQuickAdd: { targetDate in
                     editingTaskItem = nil
                     quickAddDefaultDate = Calendar.current.startOfDay(for: targetDate ?? Date())
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.84)) {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
                         showQuickAddSheet = true
                     }
                 },
@@ -133,7 +137,7 @@ struct IOSRootShellView: View {
                     editingTaskItem = item
                     flightCoordinator.activeEditingBlockId = item.block.id
                     quickAddDefaultDate = item.block.task?.scheduleDate ?? Calendar.current.startOfDay(for: Date())
-                    withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
                         showQuickAddSheet = true
                     }
                 },
@@ -144,19 +148,11 @@ struct IOSRootShellView: View {
             )
             .ignoresSafeArea()
 
-            // Smooth scrim behind expanded Task Composer
+            // Smooth scrim behind expanded Task Composer (tapping outside does NOT dismiss; close via swipe-down or X)
             Color.black.opacity(showQuickAddSheet ? 0.32 : 0)
                 .ignoresSafeArea()
                 .allowsHitTesting(showQuickAddSheet)
-                .animation(.easeInOut(duration: 0.24), value: showQuickAddSheet)
-                .onTapGesture {
-                    IOSKeyboard.dismiss()
-                    flightCoordinator.activeEditingBlockId = nil
-                    withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
-                        showQuickAddSheet = false
-                        editingTaskItem = nil
-                    }
-                }
+                .animation(.easeInOut(duration: 0.18), value: showQuickAddSheet)
 
             // Native iOS 26 Liquid Glass morph between '+' button and Task Composer inside one shared
             // ignoresSafeArea coordinate space so the keyboard never cancels or snaps the morph
@@ -183,7 +179,7 @@ struct IOSRootShellView: View {
                                         IOSHaptics.shared.playComposerMorphHaptic(expanding: true)
                                         editingTaskItem = nil
                                         quickAddDefaultDate = Calendar.current.startOfDay(for: Date())
-                                        withAnimation(.spring(response: 0.38, dampingFraction: 0.84)) {
+                                        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
                                             showQuickAddSheet = true
                                         }
                                     } else {
@@ -215,7 +211,7 @@ struct IOSRootShellView: View {
                                     initialDate: quickAddDefaultDate,
                                     editingItem: editingTaskItem,
                                     embedGlassBackground: false,
-                                    immediateFocus: editingTaskItem != nil,
+                                    immediateFocus: true,
                                     onCreatedTaskForFlight: { created, textFieldFrame, cardFrame in
                                         IOSKeyboard.dismiss()
                                         flightCoordinator.launchSettleToRow(
@@ -231,25 +227,38 @@ struct IOSRootShellView: View {
                                             composerCardFrame: cardFrame
                                         )
                                         flightCoordinator.activeEditingBlockId = nil
-                                        // Zero-frame handoff so the composer itself becomes the liquid glass bubble
                                         var noAnim = Transaction()
                                         noAnim.disablesAnimations = true
                                         withTransaction(noAnim) {
                                             showQuickAddSheet = false
                                             editingTaskItem = nil
                                         }
+                                    },
+                                    onOpenDayDocument: { docId in
+                                        IOSKeyboard.dismiss()
+                                        flightCoordinator.activeEditingBlockId = nil
+                                        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                                            showQuickAddSheet = false
+                                            editingTaskItem = nil
+                                        }
+                                        switch selectedTab {
+                                        case .home: homePath.append(.document(docId))
+                                        case .tasks: tasksPath.append(.document(docId))
+                                        case .calendar: calendarPath.append(.document(docId))
+                                        }
                                     }
                                 ) {
                                     IOSHaptics.shared.playComposerMorphHaptic(expanding: false)
                                     IOSKeyboard.dismiss()
                                     flightCoordinator.activeEditingBlockId = nil
-                                    withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+                                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
                                         showQuickAddSheet = false
                                         editingTaskItem = nil
                                     }
                                 }
                                 .id(editingTaskItem?.id ?? "create-new-task")
                                 .frame(width: max(260, geo.size.width - 28))
+                                .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                                 .roweIOSGlassRoundedRect(radius: 24, interactive: false)
                                 .modifier(ConditionalGlassMorphID(enabled: editingTaskItem == nil, id: "taskComposerMorph", namespace: composerMorphNS))
                                 .onGeometryChange(for: CGRect.self) { proxy in
@@ -276,11 +285,13 @@ struct IOSRootShellView: View {
                 liveComposerFrame: liveComposerFrame
             )
 
-            // Top-to-bottom optical downsync shockwave + gradual dim (excluding newly synced tasks)
-            IOSDownsyncWaveOverlay(
-                waveCoordinator: downsyncWaveCoordinator,
-                flightCoordinator: flightCoordinator
-            )
+            // Calendar-page-only full-rainbow sync wave (never shown on Home, Docs, Tasks, or Settings)
+            if isCalendarPageOpen {
+                IOSDownsyncWaveOverlay(
+                    waveCoordinator: downsyncWaveCoordinator,
+                    flightCoordinator: flightCoordinator
+                )
+            }
 
             // Global Contextual Search (pull-down from anywhere on iOS, matching macOS QuickOpenPanel)
             if store.isQuickOpenPresented {
@@ -364,8 +375,14 @@ struct IOSRootShellView: View {
         .onChange(of: store.settings.hasCompletedOnboarding) { _, completed in
             showOnboarding = !completed
         }
+        .onChange(of: isCalendarPageOpen) { _, open in
+            if !open {
+                downsyncWaveCoordinator.reset()
+            }
+        }
         .onChange(of: store.manualSyncWaveId) { _, _ in
             guard store.isSignedIn,
+                  isCalendarPageOpen,
                   !store.settings.reduceAnimations,
                   store.settings.crazySyncAnimation,
                   flightCoordinator.activeFlight == nil else { return }
@@ -380,7 +397,8 @@ struct IOSRootShellView: View {
             }
         }
         .onChange(of: store.downsyncWaveId) { _, _ in
-            guard !store.settings.reduceAnimations,
+            guard isCalendarPageOpen,
+                  !store.settings.reduceAnimations,
                   store.settings.crazySyncAnimation else { return }
             downsyncWaveCoordinator.trigger(
                 taskIds: store.downsyncedTaskIds,
@@ -736,7 +754,7 @@ private struct IOSQuickOpenView: View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             var list: [IOSQuickOpenItem] = [.newDocument]
-            list.append(contentsOf: store.documents.filter { !$0.isTrashed }.prefix(8).map { .recentDoc($0) })
+            list.append(contentsOf: store.visibleDocuments.filter { !$0.isTrashed }.prefix(8).map { .recentDoc($0) })
             return list
         }
         var list: [IOSQuickOpenItem] = store.contextualSearchResponse.hits.map { .searchHit($0) }

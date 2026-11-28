@@ -77,7 +77,7 @@ struct WorkspaceSidebarView: View {
                     // Starred (drag to reorder, right-click to unstar)
                     sectionHeader("Starred", type: .starred, isCollapsed: starredSection.isCollapsed)
                     if !starredSection.isCollapsed {
-                        let starred = store.documents.filter { $0.isStarred && !$0.isTrashed }
+                        let starred = store.visibleDocuments.filter { $0.isStarred && !$0.isTrashed }
                         if starred.isEmpty {
                             Text("Star key documents for quick access")
                                 .font(.system(size: 11.5))

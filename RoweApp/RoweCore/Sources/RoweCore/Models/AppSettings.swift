@@ -71,6 +71,20 @@ public enum AccentColorChoice: String, Codable, CaseIterable, Sendable {
         return isDark ? hex : lightHex
     }
 
+    /// Returns true when the resolved accent fill is light enough that dark foreground
+    /// glyphs (such as task checkbox checkmarks) provide crisp contrast over white.
+    public func prefersDarkForeground(isDark: Bool) -> Bool {
+        let cleaned = resolvedHex(isDark: isDark).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard cleaned.count == 6, let rgb = UInt32(cleaned, radix: 16) else {
+            return self == .graphite && isDark
+        }
+        let r = Double((rgb >> 16) & 0xFF) / 255.0
+        let g = Double((rgb >> 8) & 0xFF) / 255.0
+        let b = Double(rgb & 0xFF) / 255.0
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return luminance > 0.56
+    }
+
     /// Muted, lower-saturation shade for calm surface fills like Calendar date cards.
     public var dullHex: String {
         switch self {

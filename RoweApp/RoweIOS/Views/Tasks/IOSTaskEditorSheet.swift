@@ -7,6 +7,7 @@ import RoweCore
 /// Title, Notes, Schedule Date (graphical calendar + Clear Date), Reminder time, Repeat frequency,
 /// Deadline Date (graphical calendar + Clear Date), and multi-image photo attachments.
 struct IOSTaskEditorSheet: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
     let item: ResolvedTaskItem
     var onClose: () -> Void
@@ -93,7 +94,7 @@ struct IOSTaskEditorSheet: View {
                             if taskState == .completed {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(store.settings.accentColor.prefersDarkForeground(isDark: colorScheme == .dark) ? Color.black.opacity(0.88) : Color.white)
                             } else if taskState == .canceled {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 11, weight: .bold))
@@ -170,7 +171,7 @@ struct IOSTaskEditorSheet: View {
                         .foregroundStyle(expandedPicker == .schedule || scheduleDate != nil ? .primary : .secondary)
                         .padding(.horizontal, 13)
                         .padding(.vertical, 8)
-                        .roweIOSGlassCapsule(interactive: true)
+                        .roweIOSGlassCapsule(interactive: false)
                     }
                     .buttonStyle(RowePressScaleStyle())
 
@@ -190,7 +191,7 @@ struct IOSTaskEditorSheet: View {
                         .foregroundStyle(expandedPicker == .deadline || deadlineDate != nil ? .primary : .secondary)
                         .padding(.horizontal, 13)
                         .padding(.vertical, 8)
-                        .roweIOSGlassCapsule(interactive: true)
+                        .roweIOSGlassCapsule(interactive: false)
                     }
                     .buttonStyle(RowePressScaleStyle())
 
@@ -200,7 +201,7 @@ struct IOSTaskEditorSheet: View {
                             .foregroundStyle(.primary)
                             .frame(width: 36, height: 36)
                     }
-                    .roweIOSGlass(in: Circle(), interactive: true)
+                    .roweIOSGlass(in: Circle(), interactive: false)
 
                     Spacer()
                 }

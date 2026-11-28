@@ -313,7 +313,10 @@ struct CalendarTasksView: View {
             }
 
             HStack(spacing: 8) {
-                TaskCheckboxControl(state: state) { newState in
+                TaskCheckboxControl(
+                    state: state,
+                    prefersDarkCheckmark: store.settings.accentColor.prefersDarkForeground(isDark: colorScheme == .dark)
+                ) { newState in
                     handleTaskStateChange(item: item, newState: newState, day: day)
                 }
 
@@ -382,11 +385,6 @@ struct CalendarTasksView: View {
             }
         }
         .padding(.vertical, 2)
-        .macDownsyncTaskShimmer(
-            isHighlighted: isDownsynced,
-            triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
-            isDarkMode: colorScheme == .dark
-        )
         .opacity(((flightCoordinator?.shouldHideRow(item.block.id) == true) || isHiddenForReveal) ? 0 : 1)
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .named("macWindowSpace"))

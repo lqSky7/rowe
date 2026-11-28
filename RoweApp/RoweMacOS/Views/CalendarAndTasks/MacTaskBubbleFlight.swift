@@ -5,16 +5,8 @@ import Observation
 import SwiftUI
 import RoweCore
 
-enum MacTaskBubbleFlightDirection: Equatable {
-    /// Text inside Composer -> bubble blooms right around text -> glides to exact row text slot -> collapses into 16×16 checkbox
-    case settleToRow
-    /// Task Row -> 16×16 checkbox un-bubbles & scoops text -> glides straight to Composer text slot -> Composer unfolds around it
-    case openForEdit
-}
-
 struct MacTaskBubbleFlightPayload: Identifiable {
     let id: UUID = UUID()
-    let direction: MacTaskBubbleFlightDirection
     let blockId: String
     let title: String
     let scheduleDate: Date
@@ -24,21 +16,20 @@ struct MacTaskBubbleFlightPayload: Identifiable {
     let documentTitle: String
     let accentColor: Color
     let isDarkMode: Bool
-    /// Exact window-space frame of the composer's text input (forward) or tapped row (reverse)
     let textOriginFrame: CGRect
-    /// Full composer card frame (for fading out the surrounding card smoothly)
     let composerCardFrame: CGRect
     let measuredTextSize: CGSize
     let startTime: Date
     let backdropCGImage: CGImage?
+    let taskTextCGImage: CGImage?
 }
 
-/// Coordinates macOS text-anchored Liquid Glass Bubble flights (exact parity with iOS, no shimmer):
-/// - Forward (`.settleToRow`): Bubble blooms tightly around the actual task text inside the composer
-///   while the surrounding card dissolves, glides straight to the row's text slot, and collapses into the 16×16 checkbox.
-/// - Reverse (`.openForEdit`): 16×16 checkbox un-bubbles into a text-sized bubble, scoops up the task text,
-///   and glides straight to the leading text slot inside TaskEditorPopover.
-/// - Background hide: keeps `activeEditingBlockId` hidden in the Calendar list while open in the composer.
+/// Coordinates the macOS Liquid Glass Bubble flight:
+/// - Captures a clean 1.0x backdrop of the underlying window AFTER the composer closes so the lens
+///   refracts the real Calendar rows (never the old modal).
+/// - Renders the task text into an alpha texture passed directly into the Metal lens shader so the
+///   glass bubble genuinely refracts BOTH the underlying Calendar rows AND the flying task text.
+/// - Travels continuously straight from the composer to the 16×16 checkbox without ever hovering.
 @MainActor
 @Observable
 final class MacTaskFlightCoordinator {
@@ -48,11 +39,11 @@ final class MacTaskFlightCoordinator {
     var activeEditingBlockId: String? = nil
     var activeFlight: MacTaskBubbleFlightPayload? = nil
 
+    @ObservationIgnored private var launchTask: Task<Void, Never>?
     @ObservationIgnored private var completionTask: Task<Void, Never>?
     @ObservationIgnored private var hapticTask: Task<Void, Never>?
 
-    static let forwardTotalDuration: TimeInterval = 0.62
-    static let reverseTotalDuration: TimeInterval = 0.42
+    nonisolated static let forwardTotalDuration: TimeInterval = 0.50
 
     func shouldHideRow(_ blockId: String) -> Bool {
         hiddenLandingBlockId == blockId || activeEditingBlockId == blockId
@@ -75,26 +66,61 @@ final class MacTaskFlightCoordinator {
 
     static func measureTaskText(_ text: String, maxWidth: CGFloat) -> CGSize {
         let safeText = text.isEmpty ? "Task" : text
-        let font = NSFont.systemFont(ofSize: 15, weight: .regular)
+        let font = NSFont.systemFont(ofSize: 13.5, weight: .medium)
         let rect = (safeText as NSString).boundingRect(
             with: CGSize(width: max(60, maxWidth), height: 60),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: [.font: font]
         )
         return CGSize(
-            width: min(max(ceil(rect.width), 16), maxWidth),
-            height: min(max(ceil(rect.height), 18), 44)
+            width: min(max(ceil(rect.width) + 6, 20), maxWidth),
+            height: min(max(ceil(rect.height) + 4, 20), 44)
         )
     }
 
-    /// Ultra-fast 0.45x downscaled CALayer snapshot (~3-5ms instead of 250ms full-Retina cacheDisplay).
+    /// Renders the flying task title into a crisp 2x RGBA CGImage so the Metal lens refracts it directly.
+    private static func renderTaskTextCGImage(title: String, size: CGSize, isDarkMode: Bool) -> CGImage? {
+        let scale: CGFloat = 2.0
+        let w = max(2, Int(ceil(size.width * scale)))
+        let h = max(2, Int(ceil(size.height * scale)))
+        guard let ctx = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.clear(CGRect(x: 0, y: 0, width: w, height: h))
+        let graphicsContext = NSGraphicsContext(cgContext: ctx, flipped: true)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: scale, y: -scale)
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13.5, weight: .medium),
+            .foregroundColor: isDarkMode ? NSColor.white : NSColor.black,
+            .paragraphStyle: paragraph
+        ]
+        (title as NSString).draw(
+            in: CGRect(x: 0, y: 1, width: size.width, height: size.height),
+            withAttributes: attrs
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        return ctx.makeImage()
+    }
+
     private func captureWindowSnapshot() -> CGImage? {
         guard let view = NSApp.keyWindow?.contentView ?? NSApp.mainWindow?.contentView,
               let layer = view.layer,
               view.bounds.width > 20, view.bounds.height > 20 else {
             return nil
         }
-        let scale: CGFloat = 0.45
+        let scale: CGFloat = 1.0
         let w = max(1, Int(view.bounds.width * scale))
         let h = max(1, Int(view.bounds.height * scale))
         guard let ctx = CGContext(
@@ -121,91 +147,49 @@ final class MacTaskFlightCoordinator {
         cancelTasks()
         hiddenLandingBlockId = item.block.id
         activeEditingBlockId = nil
-        let snapshot = captureWindowSnapshot()
         let title = item.block.content.isEmpty ? "Image Task" : item.block.content
         let maxTextW = textFieldFrame.width > 40 ? textFieldFrame.width : 500
         let measured = Self.measureTaskText(title, maxWidth: maxTextW)
+        let textImg = Self.renderTaskTextCGImage(title: title, size: measured, isDarkMode: isDarkMode)
 
-        let payload = MacTaskBubbleFlightPayload(
-            direction: .settleToRow,
-            blockId: item.block.id,
-            title: title,
-            scheduleDate: Calendar.current.startOfDay(for: item.block.task?.scheduleDate ?? Date()),
-            hasRepeat: item.block.task?.repeatRule != nil,
-            imageCount: item.block.task?.attachedImagesBase64.count ?? 0,
-            isInbox: item.isInbox,
-            documentTitle: item.documentTitle,
-            accentColor: accentColor,
-            isDarkMode: isDarkMode,
-            textOriginFrame: textFieldFrame,
-            composerCardFrame: composerCardFrame,
-            measuredTextSize: measured,
-            startTime: Date(),
-            backdropCGImage: snapshot
-        )
-        activeFlight = payload
-        HapticsManager.shared.tap()
+        // Wait 1 display tick so SwiftUI removes the composer modal BEFORE capturing the clean window backdrop
+        launchTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 16_000_000)
+            guard !Task.isCancelled, let self else { return }
+            let snapshot = self.captureWindowSnapshot()
+            let payload = MacTaskBubbleFlightPayload(
+                blockId: item.block.id,
+                title: title,
+                scheduleDate: Calendar.current.startOfDay(for: item.block.task?.scheduleDate ?? Date()),
+                hasRepeat: item.block.task?.repeatRule != nil,
+                imageCount: item.block.task?.attachedImagesBase64.count ?? 0,
+                isInbox: item.isInbox,
+                documentTitle: item.documentTitle,
+                accentColor: accentColor,
+                isDarkMode: isDarkMode,
+                textOriginFrame: textFieldFrame,
+                composerCardFrame: composerCardFrame,
+                measuredTextSize: measured,
+                startTime: Date(),
+                backdropCGImage: snapshot,
+                taskTextCGImage: textImg
+            )
+            self.activeFlight = payload
+            HapticsManager.shared.tap()
 
-        hapticTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 130_000_000)
-            guard !Task.isCancelled, self?.activeFlight?.id == payload.id else { return }
-            HapticsManager.shared.boundarySnap()
-        }
+            self.hapticTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled, self?.activeFlight?.id == payload.id else { return }
+                HapticsManager.shared.boundarySnap()
+            }
 
-        completionTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.forwardTotalDuration * 1_000_000_000))
-            guard !Task.isCancelled, let self, self.activeFlight?.id == payload.id else { return }
-            HapticsManager.shared.taskComplete()
-            self.activeFlight = nil
-            self.hiddenLandingBlockId = nil
-        }
-    }
-
-    func launchOpenForEdit(
-        item: ResolvedTaskItem,
-        accentColor: Color,
-        isDarkMode: Bool,
-        onReadyForComposer: @escaping () -> Void
-    ) {
-        guard let rowFrame = rowFrames[item.block.id], rowFrame.width > 20 else {
-            activeEditingBlockId = item.block.id
-            onReadyForComposer()
-            return
-        }
-        cancelTasks()
-        hiddenLandingBlockId = item.block.id
-        activeEditingBlockId = item.block.id
-        let snapshot = captureWindowSnapshot()
-        let title = item.block.content.isEmpty ? "Untitled Task" : item.block.content
-        let maxTextW = max(160, rowFrame.width - 80)
-        let measured = Self.measureTaskText(title, maxWidth: maxTextW)
-
-        let payload = MacTaskBubbleFlightPayload(
-            direction: .openForEdit,
-            blockId: item.block.id,
-            title: title,
-            scheduleDate: Calendar.current.startOfDay(for: item.block.task?.scheduleDate ?? Date()),
-            hasRepeat: item.block.task?.repeatRule != nil,
-            imageCount: item.block.task?.attachedImagesBase64.count ?? 0,
-            isInbox: item.isInbox,
-            documentTitle: item.documentTitle,
-            accentColor: accentColor,
-            isDarkMode: isDarkMode,
-            textOriginFrame: rowFrame,
-            composerCardFrame: .zero,
-            measuredTextSize: measured,
-            startTime: Date(),
-            backdropCGImage: snapshot
-        )
-        activeFlight = payload
-        HapticsManager.shared.boundarySnap()
-
-        completionTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.reverseTotalDuration * 1_000_000_000))
-            guard !Task.isCancelled, let self, self.activeFlight?.id == payload.id else { return }
-            onReadyForComposer()
-            self.activeFlight = nil
-            self.hiddenLandingBlockId = nil
+            self.completionTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.forwardTotalDuration * 1_000_000_000))
+                guard !Task.isCancelled, let self, self.activeFlight?.id == payload.id else { return }
+                HapticsManager.shared.taskComplete()
+                self.activeFlight = nil
+                self.hiddenLandingBlockId = nil
+            }
         }
     }
 
@@ -214,6 +198,7 @@ final class MacTaskFlightCoordinator {
     }
 
     private func cancelTasks() {
+        launchTask?.cancel()
         completionTask?.cancel()
         hapticTask?.cancel()
     }
@@ -234,12 +219,15 @@ final class MacTaskFlightCoordinator {
     }
 }
 
-// MARK: - 120fps Optical & Geometric State (Text-Anchored, Non-Constant Bubble Sizes, No Shimmer)
+// MARK: - 120fps Optical & Geometric State (Direct-to-Checkbox Trajectory, Zero Hover)
 
 private struct MacBubbleUniforms {
     var resolution: SIMD2<Float>
     var center: SIMD2<Float>
     var halfSize: SIMD2<Float>
+    var textCenter: SIMD2<Float>
+    var textHalfSize: SIMD2<Float>
+    var textOpacity: Float
     var cornerRadius: Float
     var power: Float
     var dispersion: Float
@@ -251,7 +239,6 @@ private struct MacBubbleUniforms {
 private struct MacTaskBubbleFrameMetrics {
     let center: CGPoint
     let textCenter: CGPoint
-    let textPower: Double
     let halfSize: CGSize
     let cornerRadius: CGFloat
     let power: Double
@@ -259,10 +246,8 @@ private struct MacTaskBubbleFrameMetrics {
     let wobblePhase: Double
     let wobbleAmp: Double
     let bubbleOpacity: Double
-    let fadingComposerRect: CGRect
-    let fadingComposerOpacity: Double
-    let refractedTextOpacity: Double
-    let settlingTextOpacity: Double
+    let flyingTextOpacity: Double
+    let settlingRowOpacity: Double
     let rowFrame: CGRect
 
     static let checkboxSize: CGFloat = 16
@@ -275,54 +260,9 @@ private struct MacTaskBubbleFrameMetrics {
         rowFrame: CGRect,
         windowSize: CGSize
     ) -> MacTaskBubbleFrameMetrics {
-        let textW = payload.measuredTextSize.width
-        let textH = payload.measuredTextSize.height
-        let bubbleW = min(max(textW + 44, 66), min(240, windowSize.width - 80))
-        let bubbleH = min(max(textH + 28, 48), 78)
+        let total = MacTaskFlightCoordinator.forwardTotalDuration
+        let u = clamp(t / total)
 
-        let checkboxCenter = CGPoint(x: rowFrame.minX + checkboxSize * 0.5, y: rowFrame.midY)
-        let clampedRowTextW = min(textW, max(40, rowFrame.width - textLeadingOffsetInRow - 48))
-        let rowTextCenter = CGPoint(
-            x: rowFrame.minX + textLeadingOffsetInRow + clampedRowTextW * 0.5,
-            y: rowFrame.midY
-        )
-
-        switch payload.direction {
-        case .settleToRow:
-            return evaluateForward(
-                t: t,
-                payload: payload,
-                rowFrame: rowFrame,
-                checkboxCenter: checkboxCenter,
-                rowTextCenter: rowTextCenter,
-                bubbleW: bubbleW,
-                bubbleH: bubbleH,
-                windowSize: windowSize
-            )
-        case .openForEdit:
-            return evaluateReverse(
-                t: t,
-                payload: payload,
-                rowFrame: rowFrame,
-                checkboxCenter: checkboxCenter,
-                rowTextCenter: rowTextCenter,
-                bubbleW: bubbleW,
-                bubbleH: bubbleH,
-                windowSize: windowSize
-            )
-        }
-    }
-
-    private static func evaluateForward(
-        t: TimeInterval,
-        payload: MacTaskBubbleFlightPayload,
-        rowFrame: CGRect,
-        checkboxCenter: CGPoint,
-        rowTextCenter: CGPoint,
-        bubbleW: CGFloat,
-        bubbleH: CGFloat,
-        windowSize: CGSize
-    ) -> MacTaskBubbleFrameMetrics {
         let cardRect = payload.composerCardFrame.width > 40
             ? payload.composerCardFrame
             : CGRect(
@@ -332,80 +272,67 @@ private struct MacTaskBubbleFrameMetrics {
                 height: 152
             )
 
+        let textW = payload.measuredTextSize.width
+        let textH = payload.measuredTextSize.height
+        let dropletW = min(max(textW * 0.55 + 32, 54), 112)
+        let dropletH = min(max(textH + 22, 44), 66)
+
+        let checkboxCenter = CGPoint(x: rowFrame.minX + checkboxSize * 0.5, y: rowFrame.midY)
+        let clampedRowTextW = min(textW, max(40, rowFrame.width - textLeadingOffsetInRow - 48))
+        let rowTextCenter = CGPoint(
+            x: rowFrame.minX + textLeadingOffsetInRow + clampedRowTextW * 0.5,
+            y: rowFrame.midY
+        )
+
         let tfOriginX = payload.textOriginFrame.width > 20 ? payload.textOriginFrame.minX : (cardRect.minX + 48)
         let tfMidY = payload.textOriginFrame.height > 10 ? payload.textOriginFrame.midY : (cardRect.minY + 66)
-        let rawTextCenterX = tfOriginX + payload.measuredTextSize.width * 0.5
-        let clampedStartX = min(max(rawTextCenterX, bubbleW * 0.5 + 8), windowSize.width - bubbleW * 0.5 - 8)
-        let textStartCenter = CGPoint(x: clampedStartX, y: tfMidY)
-
-        // Composer itself turns into the bubble and rapidly wraps around the text WHILE already traveling
-        let wrapU = clamp(t / 0.20)
-        let wrap = smoothstep(wrapU)
-
-        let flightU = clamp(t / 0.44)
-        let flight = springEase(flightU)
-
-        // Late path divergence right before arrival: bubble curves into 16x16 checkbox, text glides into row slot
-        let divergeU = clamp((t - 0.34) / 0.24)
-        let diverge = smoothstep(divergeU)
-
-        let flightArc = sin(flightU * .pi)
-        let stretch = CGFloat(flightArc * 0.07 * wrap * (1.0 - diverge))
-        let tightW = bubbleW * (1.0 - stretch * 0.35)
-        let tightH = bubbleH * (1.0 + stretch)
-        let wrappedW = lerp(cardRect.width, tightW, wrap)
-        let wrappedH = lerp(cardRect.height, tightH, wrap)
-        let currentW = lerp(wrappedW, checkboxSize, diverge)
-        let currentH = lerp(wrappedH, checkboxSize, diverge)
-
-        let bubbleCorner = min(tightW, tightH) * 0.5
-        let wrappedCorner = lerp(20.0, bubbleCorner, wrap)
-        let cornerRadius = lerp(wrappedCorner, checkboxCorner, diverge)
-
-        let approachTarget = CGPoint(
-            x: lerp(rowTextCenter.x, checkboxCenter.x, 0.32),
-            y: rowTextCenter.y
+        let textStartCenter = CGPoint(
+            x: min(max(tfOriginX + textW * 0.5, 24), windowSize.width - 24),
+            y: tfMidY
         )
-        let liftY = -14.0 * CGFloat(flightArc)
-        let textTravelPos = CGPoint(
-            x: lerp(textStartCenter.x, approachTarget.x, flight),
-            y: lerp(textStartCenter.y, approachTarget.y, flight) + liftY
-        )
-        let cardCenter = CGPoint(x: cardRect.midX, y: cardRect.midY)
-        let cardFlightCenter = CGPoint(
-            x: lerp(cardCenter.x, textTravelPos.x, wrap),
-            y: lerp(cardCenter.y, textTravelPos.y, wrap)
-        )
+        let bubbleStartCenter = CGPoint(x: cardRect.midX, y: cardRect.midY)
 
-        let bubbleBranchArc = -6.0 * CGFloat(sin(divergeU * .pi))
-        let currentCenter = CGPoint(
-            x: lerp(cardFlightCenter.x, checkboxCenter.x, diverge),
-            y: lerp(cardFlightCenter.y, checkboxCenter.y, diverge) + bubbleBranchArc
+        // Bubble moves continuously on a smooth curve directly to checkboxCenter from t=0 (zero hover!)
+        let bubbleProgress = easeInOutCubic(u)
+        let controlPoint = CGPoint(
+            x: lerp(bubbleStartCenter.x, checkboxCenter.x, 0.35) - 28,
+            y: min(bubbleStartCenter.y, checkboxCenter.y) - 20
         )
+        let currentCenter = quadBezier(bubbleStartCenter, controlPoint, checkboxCenter, t: bubbleProgress)
+
+        let condense = smoothstep(clamp(u / 0.28))
+        let shrinkToCheckbox = smoothstep(clamp((u - 0.14) / 0.86))
+        let arcStretch = sin(u * .pi) * 0.08 * (1.0 - shrinkToCheckbox)
+        let midW = lerp(cardRect.width, dropletW * (1.0 - CGFloat(arcStretch * 0.3)), condense)
+        let midH = lerp(cardRect.height, dropletH * (1.0 + CGFloat(arcStretch)), condense)
+        let currentW = lerp(midW, checkboxSize, shrinkToCheckbox)
+        let currentH = lerp(midH, checkboxSize, shrinkToCheckbox)
+
+        let dropletCorner = min(dropletW, dropletH) * 0.5
+        let midCorner = lerp(20.0, dropletCorner, condense)
+        let cornerRadius = lerp(midCorner, checkboxCorner, shrinkToCheckbox)
+
+        // Task text independently glides straight into rowTextCenter
+        let textProgress = easeOutCubic(clamp(u / 0.78))
         let textCenter = CGPoint(
-            x: lerp(textTravelPos.x, rowTextCenter.x, diverge),
-            y: lerp(textTravelPos.y, rowTextCenter.y, diverge)
+            x: lerp(textStartCenter.x, rowTextCenter.x, textProgress),
+            y: lerp(textStartCenter.y, rowTextCenter.y, textProgress) - 8.0 * CGFloat(sin(textProgress * .pi))
         )
 
-        let wobbleFade = 1.0 - smoothstep(clamp(divergeU / 0.85))
-        let opticalRamp = 0.25 + 0.75 * wrap
-        let opticalEnv = opticalRamp * (1.0 - diverge * 0.85)
-        let power = 0.84 * opticalEnv
-        let dispersion = 0.92 * opticalEnv
-        let wobbleAmp = 0.95 * wrap * wobbleFade
-        let wobblePhase = t * 7.6
+        let opticalEnv = (0.35 + 0.65 * condense) * (1.0 - smoothstep(clamp((u - 0.76) / 0.24)) * 0.78)
+        let power = 0.88 * opticalEnv
+        let dispersion = 0.72 * opticalEnv
+        let wobbleAmp = 0.90 * condense * (1.0 - shrinkToCheckbox)
+        let wobblePhase = t * 8.2
 
-        let bubbleOpacity = 1.0 - smoothstep(clamp((t - 0.58) / 0.04))
-
-        let textPower = power * wrap * (1.0 - smoothstep(clamp(divergeU / 0.72)))
-        let textHandoff = smoothstep(clamp((t - 0.50) / 0.09))
-        let refractedTextOpacity = (1.0 - textHandoff) * (1.0 - smoothstep(clamp((t - 0.58) / 0.04)))
-        let settlingTextOpacity = t < 0.62 ? textHandoff : 0.0
+        let bubbleOpacity = 1.0 - smoothstep(clamp((u - 0.90) / 0.10))
+        let textHandoff = smoothstep(clamp((u - 0.72) / 0.18))
+        let flyingTextOpacity = 1.0 - textHandoff
+        let settlingRowOpacity = textHandoff
 
         return MacTaskBubbleFrameMetrics(
             center: currentCenter,
             textCenter: textCenter,
-            textPower: textPower,
             halfSize: CGSize(width: currentW * 0.5, height: currentH * 0.5),
             cornerRadius: cornerRadius,
             power: power,
@@ -413,125 +340,29 @@ private struct MacTaskBubbleFrameMetrics {
             wobblePhase: wobblePhase,
             wobbleAmp: wobbleAmp,
             bubbleOpacity: bubbleOpacity,
-            fadingComposerRect: .zero,
-            fadingComposerOpacity: 0.0,
-            refractedTextOpacity: refractedTextOpacity,
-            settlingTextOpacity: settlingTextOpacity,
-            rowFrame: rowFrame
-        )
-    }
-
-    private static func evaluateReverse(
-        t: TimeInterval,
-        payload: MacTaskBubbleFlightPayload,
-        rowFrame: CGRect,
-        checkboxCenter: CGPoint,
-        rowTextCenter: CGPoint,
-        bubbleW: CGFloat,
-        bubbleH: CGFloat,
-        windowSize: CGSize
-    ) -> MacTaskBubbleFrameMetrics {
-        let composerW: CGFloat = 600
-        let composerH: CGFloat = 152
-        let composerRect = CGRect(
-            x: windowSize.width * 0.5 - composerW * 0.5 + 44,
-            y: windowSize.height * 0.5 - composerH * 0.5 - 56,
-            width: composerW,
-            height: composerH
-        )
-        // Exact leading text slot inside TaskEditorPopover (padding 20 + checkbox 16 + spacing 12 = 48)
-        let destTextOriginX = composerRect.minX + 48
-        let destTextMidY = composerRect.minY + 66
-        let rawDestX = destTextOriginX + payload.measuredTextSize.width * 0.5
-        let destTextCenter = CGPoint(
-            x: min(max(rawDestX, bubbleW * 0.5 + 8), windowSize.width - bubbleW * 0.5 - 8),
-            y: destTextMidY
-        )
-
-        let convergeU = clamp(t / 0.16)
-        let converge = smoothstep(convergeU)
-        let flightU = clamp((t - 0.04) / 0.30)
-        let flight = springEase(flightU)
-        let unwrapU = clamp((t - 0.24) / 0.18)
-        let unwrap = smoothstep(unwrapU)
-
-        let midW = lerp(checkboxSize, bubbleW, converge)
-        let midH = lerp(checkboxSize, bubbleH, converge)
-        let currentW = lerp(midW, composerRect.width, unwrap)
-        let currentH = lerp(midH, composerRect.height, unwrap)
-        let bubbleCorner = min(bubbleW, bubbleH) * 0.5
-        let midCorner = lerp(checkboxCorner, bubbleCorner, converge)
-        let cornerRadius = lerp(midCorner, 20.0, unwrap)
-
-        let approachOrigin = CGPoint(
-            x: lerp(rowTextCenter.x, checkboxCenter.x, 0.32),
-            y: rowTextCenter.y
-        )
-        let flightArc = sin(flightU * .pi)
-        let sharedPos = CGPoint(
-            x: lerp(approachOrigin.x, destTextCenter.x, flight),
-            y: lerp(approachOrigin.y, destTextCenter.y, flight) - 14.0 * CGFloat(flightArc)
-        )
-
-        let bubbleMergeArc = -6.0 * CGFloat(sin(convergeU * .pi))
-        let mergedBubblePos = CGPoint(
-            x: lerp(checkboxCenter.x, sharedPos.x, converge),
-            y: lerp(checkboxCenter.y, sharedPos.y, converge) + bubbleMergeArc
-        )
-        let composerCenter = CGPoint(x: composerRect.midX, y: composerRect.midY)
-        let currentCenter = CGPoint(
-            x: lerp(mergedBubblePos.x, composerCenter.x, unwrap),
-            y: lerp(mergedBubblePos.y, composerCenter.y, unwrap)
-        )
-        let textCenter = CGPoint(
-            x: lerp(rowTextCenter.x, sharedPos.x, converge),
-            y: lerp(rowTextCenter.y, sharedPos.y, converge)
-        )
-
-        let opticalEnv = converge * (1.0 - unwrap * 0.72)
-        let power = 0.84 * opticalEnv
-        let dispersion = 0.90 * opticalEnv
-        let wobbleAmp = 0.95 * converge * (1.0 - unwrap)
-        let wobblePhase = -t * 7.6
-
-        let textPower = power * smoothstep(clamp(convergeU / 0.85)) * (1.0 - unwrap)
-        let textPickup = smoothstep(clamp(t / 0.06))
-        let settlingTextOpacity = 1.0 - textPickup
-        let refractedTextOpacity = textPickup * (1.0 - smoothstep(clamp((t - 0.36) / 0.06)))
-
-        return MacTaskBubbleFrameMetrics(
-            center: currentCenter,
-            textCenter: textCenter,
-            textPower: textPower,
-            halfSize: CGSize(width: currentW * 0.5, height: currentH * 0.5),
-            cornerRadius: cornerRadius,
-            power: power,
-            dispersion: dispersion,
-            wobblePhase: wobblePhase,
-            wobbleAmp: wobbleAmp,
-            bubbleOpacity: 1.0 - smoothstep(clamp((t - 0.37) / 0.05)),
-            fadingComposerRect: .zero,
-            fadingComposerOpacity: 0.0,
-            refractedTextOpacity: refractedTextOpacity,
-            settlingTextOpacity: settlingTextOpacity,
+            flyingTextOpacity: flyingTextOpacity,
+            settlingRowOpacity: settlingRowOpacity,
             rowFrame: rowFrame
         )
     }
 
     private static func clamp(_ v: Double) -> Double { min(max(v, 0), 1) }
     private static func smoothstep(_ t: Double) -> Double { t * t * (3 - 2 * t) }
+    private static func easeOutCubic(_ t: Double) -> Double { 1.0 - pow(1.0 - t, 3.0) }
+    private static func easeInOutCubic(_ t: Double) -> Double {
+        t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+    }
     private static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: Double) -> CGFloat { a + (b - a) * CGFloat(t) }
-
-    private static func springEase(_ u: Double) -> Double {
-        guard u > 0 else { return 0 }
-        guard u < 1 else { return 1 }
-        let raw = 1.0 - exp(-6.4 * u) * cos(4.6 * u)
-        let end = 1.0 - exp(-6.4) * cos(4.6)
-        return raw / end
+    private static func quadBezier(_ p0: CGPoint, _ p1: CGPoint, _ p2: CGPoint, t: Double) -> CGPoint {
+        let mt = 1.0 - t
+        let a = CGFloat(mt * mt)
+        let b = CGFloat(2.0 * mt * t)
+        let c = CGFloat(t * t)
+        return CGPoint(x: a * p0.x + b * p1.x + c * p2.x, y: a * p0.y + b * p1.y + c * p2.y)
     }
 }
 
-// MARK: - Prewarmed Metal Pipeline Cache (Zero First-Frame Compilation Lag on Enter)
+// MARK: - Prewarmed Metal Pipeline Cache (Refracts Backdrop + Moving Task Text Together)
 
 @MainActor
 final class MacBubbleMetalCache {
@@ -550,6 +381,9 @@ final class MacBubbleMetalCache {
         float2 resolution;
         float2 center;
         float2 halfSize;
+        float2 textCenter;
+        float2 textHalfSize;
+        float textOpacity;
         float cornerRadius;
         float power;
         float dispersion;
@@ -576,9 +410,30 @@ final class MacBubbleMetalCache {
         return min(max(q.x, q.y), 0.0f) + length(max(q, float2(0.0f))) - radius;
     }
 
+    static float3 sampleSceneAt(
+        float2 posPx,
+        texture2d<float> backdrop,
+        texture2d<float> taskText,
+        sampler s,
+        constant Uniforms& u
+    ) {
+        float2 invRes = 1.0f / max(u.resolution, float2(1.0f));
+        float3 bg = backdrop.sample(s, clamp(posPx * invRes, 0.0f, 1.0f)).rgb;
+        if (u.textOpacity > 0.005f && u.textHalfSize.x > 1.0f && u.textHalfSize.y > 1.0f) {
+            float2 tuv = (posPx - (u.textCenter - u.textHalfSize)) / (u.textHalfSize * 2.0f);
+            if (tuv.x >= 0.0f && tuv.x <= 1.0f && tuv.y >= 0.0f && tuv.y <= 1.0f) {
+                float4 txt = taskText.sample(s, tuv);
+                float a = clamp(txt.a * u.textOpacity, 0.0f, 1.0f);
+                bg = mix(bg, txt.rgb / max(txt.a, 0.001f), a);
+            }
+        }
+        return bg;
+    }
+
     fragment float4 bubble_fs(
         VSOut in [[stage_in]],
         texture2d<float> backdrop [[texture(0)]],
+        texture2d<float> taskText [[texture(1)]],
         constant Uniforms& u [[buffer(0)]]
     ) {
         if (u.opacity <= 0.001f) {
@@ -614,23 +469,22 @@ final class MacBubbleMetalCache {
         float2 tangent = float2(-direction.y, direction.x);
 
         float zoom = mix(1.0f, 0.48f + pow(r, 3.0f) * 0.80f, u.power);
-        float split = pow(r, 2.4f) * min(minDim * 0.34f, 24.0f) * u.dispersion;
+        float split = pow(r, 2.4f) * min(minDim * 0.28f, 18.0f) * u.dispersion;
 
         float2 base = delta * (zoom - 1.0f);
-        float2 redOffset   = clamp(base - direction * split * 1.18f + tangent * split * 0.24f, -140.0f, 140.0f);
+        float2 redOffset   = clamp(base - direction * split * 1.12f + tangent * split * 0.20f, -140.0f, 140.0f);
         float2 greenOffset = clamp(base, -140.0f, 140.0f);
-        float2 blueOffset  = clamp(base + direction * split * 1.26f - tangent * split * 0.24f, -140.0f, 140.0f);
+        float2 blueOffset  = clamp(base + direction * split * 1.18f - tangent * split * 0.20f, -140.0f, 140.0f);
 
         constexpr sampler s(filter::linear, address::clamp_to_edge);
-        float2 invRes = 1.0f / max(u.resolution, float2(1.0f));
-        float4 red   = backdrop.sample(s, clamp((position + redOffset) * invRes, 0.0f, 1.0f));
-        float4 green = backdrop.sample(s, clamp((position + greenOffset) * invRes, 0.0f, 1.0f));
-        float4 blue  = backdrop.sample(s, clamp((position + blueOffset) * invRes, 0.0f, 1.0f));
+        float3 sR = sampleSceneAt(position + redOffset, backdrop, taskText, s, u);
+        float3 sG = sampleSceneAt(position + greenOffset, backdrop, taskText, s, u);
+        float3 sB = sampleSceneAt(position + blueOffset, backdrop, taskText, s, u);
 
-        float3 color = float3(red.r, green.g, blue.b);
+        float3 color = float3(sR.r, sG.g, sB.b);
 
         float z = sqrt(max(1.0f - min(r * r, 1.0f), 0.0f));
-        float frost = mix(0.14f, 0.03f, u.power) * (0.42f + 0.58f * (1.0f - z));
+        float frost = mix(0.12f, 0.025f, u.power) * (0.42f + 0.58f * (1.0f - z));
         color = mix(color, float3(0.14f), frost * u.power);
 
         float topLight = pow(max(dot(n, normalize(float2(-0.32f, -0.88f))), 0.0f), 3.4f);
@@ -641,19 +495,12 @@ final class MacBubbleMetalCache {
         float rim = smoothstep(-2.4f, -0.35f, sdf) * (1.0f - smoothstep(-0.15f, 1.1f, sdf));
         float innerShade = smoothstep(0.76f, 0.96f, r) * (1.0f - rim) * 0.045f * u.power;
 
-        float3 rimTint = float3(
-            1.0f + 0.22f * u.dispersion * sin(angle * 2.0f + u.wobblePhase),
-            1.0f,
-            1.0f + 0.22f * u.dispersion * cos(angle * 2.0f - u.wobblePhase)
-        );
-
-        color += float3(specular + bounce - innerShade) + rimTint * (rim * 0.38f * (0.32f + 0.68f * u.power));
+        color += float3(specular + bounce - innerShade) + float3(1.0f) * (rim * 0.36f * (0.32f + 0.68f * u.power));
         float outAlpha = mask * u.opacity;
         return float4(clamp(color, 0.0f, 1.0f) * outAlpha, outAlpha);
     }
     """
 
-    /// Precompiles the Metal shader asynchronously on app launch so pressing Enter has 0ms shader lag.
     func prewarm() {
         guard !didStartPrewarm, let device else { return }
         didStartPrewarm = true
@@ -682,15 +529,12 @@ final class MacBubbleMetalCache {
     }
 }
 
-// MARK: - Runtime-Compiled Metal Optical Liquid Glass Bubble View
-
 private struct MacTaskBubbleMetalView: NSViewRepresentable {
     let backdropImage: CGImage?
+    let taskTextImage: CGImage?
     let uniforms: MacBubbleUniforms
 
-    func makeCoordinator() -> Renderer {
-        Renderer()
-    }
+    func makeCoordinator() -> Renderer { Renderer() }
 
     func makeNSView(context: Context) -> MTKView {
         let mtk = MTKView()
@@ -710,7 +554,11 @@ private struct MacTaskBubbleMetalView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: MTKView, context: Context) {
-        context.coordinator.updateBackdropIfNeeded(image: backdropImage, device: nsView.device)
+        context.coordinator.updateTexturesIfNeeded(
+            backdrop: backdropImage,
+            taskText: taskTextImage,
+            device: nsView.device
+        )
         context.coordinator.uniforms = uniforms
         nsView.setNeedsDisplay(nsView.bounds)
     }
@@ -718,11 +566,16 @@ private struct MacTaskBubbleMetalView: NSViewRepresentable {
     @MainActor
     final class Renderer: NSObject, MTKViewDelegate {
         private var backdropTexture: MTLTexture?
+        private var textTexture: MTLTexture?
         private var lastBackdropId: ObjectIdentifier?
+        private var lastTextId: ObjectIdentifier?
         var uniforms = MacBubbleUniforms(
             resolution: .init(1, 1),
             center: .zero,
             halfSize: .init(1, 1),
+            textCenter: .zero,
+            textHalfSize: .init(1, 1),
+            textOpacity: 0,
             cornerRadius: 20,
             power: 0,
             dispersion: 0,
@@ -731,16 +584,27 @@ private struct MacTaskBubbleMetalView: NSViewRepresentable {
             opacity: 0
         )
 
-        func updateBackdropIfNeeded(image: CGImage?, device: MTLDevice?) {
-            guard let image, let device else { return }
-            let id = ObjectIdentifier(image)
-            guard id != lastBackdropId else { return }
-            lastBackdropId = id
+        func updateTexturesIfNeeded(backdrop: CGImage?, taskText: CGImage?, device: MTLDevice?) {
+            guard let device else { return }
             let loader = MTKTextureLoader(device: device)
-            backdropTexture = try? loader.newTexture(cgImage: image, options: [
+            let opts: [MTKTextureLoader.Option: Any] = [
                 .SRGB: false,
                 .textureUsage: NSNumber(value: MTLTextureUsage.shaderRead.rawValue)
-            ])
+            ]
+            if let backdrop {
+                let id = ObjectIdentifier(backdrop)
+                if id != lastBackdropId {
+                    lastBackdropId = id
+                    backdropTexture = try? loader.newTexture(cgImage: backdrop, options: opts)
+                }
+            }
+            if let taskText {
+                let id = ObjectIdentifier(taskText)
+                if id != lastTextId {
+                    lastTextId = id
+                    textTexture = try? loader.newTexture(cgImage: taskText, options: opts)
+                }
+            }
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -757,6 +621,7 @@ private struct MacTaskBubbleMetalView: NSViewRepresentable {
             var u = uniforms
             enc.setRenderPipelineState(pipelineState)
             enc.setFragmentTexture(texture, index: 0)
+            enc.setFragmentTexture(textTexture ?? texture, index: 1)
             enc.setFragmentBytes(&u, length: MemoryLayout<MacBubbleUniforms>.stride, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             enc.endEncoding()
@@ -776,9 +641,7 @@ struct MacTaskBubbleFlightOverlay: View {
             TimelineView(.animation) { timeline in
                 GeometryReader { geo in
                     let elapsed = max(0, timeline.date.timeIntervalSince(payload.startTime))
-                    let rowFrame = payload.direction == .openForEdit
-                        ? payload.textOriginFrame
-                        : coordinator.destinationFrame(for: payload, in: geo.size)
+                    let rowFrame = coordinator.destinationFrame(for: payload, in: geo.size)
                     let m = MacTaskBubbleFrameMetrics.evaluate(
                         elapsed: elapsed,
                         payload: payload,
@@ -787,40 +650,39 @@ struct MacTaskBubbleFlightOverlay: View {
                     )
 
                     ZStack {
-                        if m.fadingComposerOpacity > 0.01 && m.fadingComposerRect.width > 40 {
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(.ultraThinMaterial)
-                                .frame(width: m.fadingComposerRect.width, height: m.fadingComposerRect.height)
-                                .position(x: m.fadingComposerRect.midX, y: m.fadingComposerRect.midY)
-                                .scaleEffect(0.96 + 0.04 * m.fadingComposerOpacity)
-                                .opacity(m.fadingComposerOpacity * 0.85)
-                                .allowsHitTesting(false)
-                        }
-
-                        if m.settlingTextOpacity > 0.01 {
+                        // Layer 1: Flying & settling task text (rendered UNDER the refracting glass bubble!)
+                        if m.settlingRowOpacity > 0.01 {
                             rowTextWithoutCheckbox(payload: payload)
                                 .frame(width: rowFrame.width, height: rowFrame.height, alignment: .leading)
                                 .position(x: rowFrame.midX, y: rowFrame.midY)
-                                .opacity(m.settlingTextOpacity)
+                                .opacity(m.settlingRowOpacity)
                                 .allowsHitTesting(false)
                         }
 
+                        if m.flyingTextOpacity > 0.01 {
+                            Text(payload.title)
+                                .font(.system(size: 13.5, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .frame(width: payload.measuredTextSize.width, alignment: .leading)
+                                .position(m.textCenter)
+                                .opacity(m.flyingTextOpacity)
+                                .allowsHitTesting(false)
+                        }
+
+                        // Layer 2: True refracting Metal glass bubble passing OVER backdrop + flying text
                         if m.bubbleOpacity > 0.01 {
-                            // 1-frame anti-flicker frosted bridge while MTKView initializes its first drawable
-                            if elapsed < 0.055 {
-                                RoundedRectangle(cornerRadius: m.cornerRadius, style: .continuous)
-                                    .fill(.ultraThinMaterial)
-                                    .frame(width: m.halfSize.width * 2, height: m.halfSize.height * 2)
-                                    .position(m.center)
-                                    .opacity(max(0, 1.0 - elapsed / 0.055))
-                                    .allowsHitTesting(false)
-                            }
                             MacTaskBubbleMetalView(
                                 backdropImage: payload.backdropCGImage,
+                                taskTextImage: payload.taskTextCGImage,
                                 uniforms: MacBubbleUniforms(
                                     resolution: SIMD2(Float(max(geo.size.width, 1)), Float(max(geo.size.height, 1))),
                                     center: SIMD2(Float(m.center.x), Float(m.center.y)),
                                     halfSize: SIMD2(Float(m.halfSize.width), Float(m.halfSize.height)),
+                                    textCenter: SIMD2(Float(m.textCenter.x), Float(m.textCenter.y)),
+                                    textHalfSize: SIMD2(Float(payload.measuredTextSize.width * 0.5), Float(payload.measuredTextSize.height * 0.5)),
+                                    textOpacity: Float(m.flyingTextOpacity),
                                     cornerRadius: Float(m.cornerRadius),
                                     power: Float(m.power),
                                     dispersion: Float(m.dispersion),
@@ -831,22 +693,7 @@ struct MacTaskBubbleFlightOverlay: View {
                             )
                             .frame(width: geo.size.width, height: geo.size.height)
                             .allowsHitTesting(false)
-                        }
 
-                        if m.refractedTextOpacity > 0.01 {
-                            Text(payload.title)
-                                .font(.system(size: 13.5, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                                .frame(width: payload.measuredTextSize.width + 6, alignment: .leading)
-                                .scaleEffect(1.0 + CGFloat(m.textPower * 0.07))
-                                .position(m.textCenter)
-                                .opacity(m.refractedTextOpacity)
-                                .allowsHitTesting(false)
-                        }
-
-                        if m.bubbleOpacity > 0.01 {
                             RoundedRectangle(cornerRadius: m.cornerRadius, style: .continuous)
                                 .stroke(
                                     LinearGradient(

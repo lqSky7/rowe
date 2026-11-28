@@ -433,19 +433,21 @@ public actor SearchIndexActor {
         let docTitle = doc.displayTitle
         let docTags = Set(doc.tags)
 
-        let docText = fold("\(docTitle) \(doc.tags.joined(separator: " ")) \(doc.previewSnippet)")
-        result.append(IndexedRecord(
-            id: "doc:\(doc.id)",
-            kind: .document(documentId: doc.id),
-            title: docTitle,
-            subtitle: doc.previewSnippet,
-            foldedSearchText: docText,
-            tokens: Set(tokenize(docText)),
-            ownerDocumentId: doc.id,
-            folderId: doc.folderId,
-            tags: docTags,
-            isDeepBlockBody: false
-        ))
+        if !doc.isHiddenTaskDocument {
+            let docText = fold("\(docTitle) \(doc.tags.joined(separator: " ")) \(doc.previewSnippet)")
+            result.append(IndexedRecord(
+                id: "doc:\(doc.id)",
+                kind: .document(documentId: doc.id),
+                title: docTitle,
+                subtitle: doc.previewSnippet,
+                foldedSearchText: docText,
+                tokens: Set(tokenize(docText)),
+                ownerDocumentId: doc.id,
+                folderId: doc.folderId,
+                tags: docTags,
+                isDeepBlockBody: false
+            ))
+        }
 
         func walk(_ blocks: [Block]) {
             for b in blocks {

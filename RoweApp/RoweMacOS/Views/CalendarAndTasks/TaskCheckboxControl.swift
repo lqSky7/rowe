@@ -5,6 +5,7 @@ import RoweCore
 /// and instant double-click cross-out (`canceled`) with red glow + trackpad buzz vibration.
 struct TaskCheckboxControl: View {
     let state: TaskCompletionState
+    var prefersDarkCheckmark: Bool = false
     let onChange: (TaskCompletionState) -> Void
 
     @State private var lastClickTimestamp: TimeInterval = 0
@@ -59,12 +60,12 @@ struct TaskCheckboxControl: View {
 
                 if state == .completed && !isFlashingRed {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(prefersDarkCheckmark ? Color.black.opacity(0.88) : Color.white)
                         .transition(.scale(scale: 0.35).combined(with: .opacity))
                 } else if state == .canceled || isFlashingRed {
                     Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 9.5, weight: .bold))
                         .foregroundStyle(.white)
                         .transition(.scale(scale: 0.35).combined(with: .opacity))
                 }

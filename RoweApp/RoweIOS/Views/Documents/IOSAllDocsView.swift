@@ -43,7 +43,7 @@ struct IOSAllDocsView: View {
     }
 
     private var filteredDocs: [RoweDocument] {
-        var list = store.documents.filter { $0.isTrashed == isTrashMode }
+        var list = store.visibleDocuments.filter { $0.isTrashed == isTrashMode }
         if let folderId {
             list = list.filter { $0.folderId == folderId }
         }

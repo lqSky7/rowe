@@ -168,6 +168,7 @@ private final class TaskInputNSTextView: NSTextView {
 }
 
 struct TaskEditorPopover: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Bindable var store: WorkspaceStore
     let request: TaskEditorRequest
     var onCommitTaskForFlight: ((ResolvedTaskItem, CGRect, CGRect) -> Void)? = nil
@@ -232,14 +233,27 @@ struct TaskEditorPopover: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                GlassCircleButton(systemImage: "xmark", helpText: "Close (Esc)", size: 24, iconSize: 10) {
+                Button {
+                    HapticsManager.shared.tap()
                     commitAndClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Color.primary.opacity(0.08)))
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
+                .help("Close (Esc)")
                 .keyboardShortcut(.escape, modifiers: [])
             }
 
             HStack(alignment: .top, spacing: 12) {
-                TaskCheckboxControl(state: taskState) { newState in
+                TaskCheckboxControl(
+                    state: taskState,
+                    prefersDarkCheckmark: store.settings.accentColor.prefersDarkForeground(isDark: colorScheme == .dark)
+                ) { newState in
                     taskState = newState
                     if existingItem != nil { persistExistingChanges() }
                 }
@@ -378,29 +392,30 @@ struct TaskEditorPopover: View {
 
                 Spacer()
 
-                if let item = existingItem {
-                    GlassPillButton("Open Doc", systemImage: "arrow.up.right") {
-                        commitAndClose()
-                        store.navigate(to: .document(item.documentId))
+                let isDark = colorScheme == .dark
+                let btnInk: Color = store.settings.accentColor.prefersDarkForeground(isDark: isDark) ? Color.black : Color.white
+                HStack(spacing: 6) {
+                    Text(existingItem != nil ? "Done" : "Add Task")
+                        .font(.system(size: 13, weight: .semibold))
+                    if existingItem == nil {
+                        Text("↵")
+                            .font(.system(size: 11, weight: .bold))
+                            .opacity(0.8)
                     }
-                } else {
-                    Button {
-                        HapticsManager.shared.tap()
-                        commitAndClose()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("Add Task")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("↵")
-                                .font(.system(size: 11, weight: .bold))
-                                .opacity(0.8)
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Color.accentColor))
-                    }
-                    .buttonStyle(RowePressScaleButtonStyle())
+                }
+                .foregroundStyle(btnInk)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(Color(hex: store.settings.accentColor.resolvedHex(isDark: isDark))))
+                .contentShape(Capsule())
+                .help("Click to save · Hold to open day document")
+                .onTapGesture {
+                    HapticsManager.shared.tap()
+                    commitAndClose()
+                }
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    HapticsManager.shared.boundarySnap()
+                    openHiddenDayDocument()
                 }
             }
         }
@@ -472,6 +487,20 @@ struct TaskEditorPopover: View {
             meta.applyStateTransition(to: taskState)
             block.task = meta
         }
+    }
+
+    private func openHiddenDayDocument() {
+        let targetDocId: String
+        if let item = existingItem {
+            persistExistingChanges()
+            store.flushPendingSyncImmediately()
+            targetDocId = item.documentId
+        } else {
+            let targetDay = scheduleDate ?? Calendar.current.startOfDay(for: Date())
+            targetDocId = store.ensureTaskDayDocument(for: targetDay).id
+        }
+        onClose()
+        store.navigate(to: .document(targetDocId))
     }
 
     private func commitAndClose() {

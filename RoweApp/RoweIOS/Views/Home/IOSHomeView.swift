@@ -16,7 +16,7 @@ struct IOSHomeView: View {
     @FocusState private var isSearchFocused: Bool
 
     private var activeDocs: [RoweDocument] {
-        let base = store.documents.filter { !$0.isTrashed }
+        let base = store.visibleDocuments.filter { !$0.isTrashed }
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let filtered = q.isEmpty ? base : base.filter {
             $0.displayTitle.lowercased().contains(q)
@@ -25,7 +25,7 @@ struct IOSHomeView: View {
     }
 
     private var trashedCount: Int {
-        store.documents.filter(\.isTrashed).count
+        store.visibleDocuments.filter(\.isTrashed).count
     }
 
     var body: some View {
@@ -166,7 +166,7 @@ struct IOSHomeView: View {
 
                         VStack(spacing: 0) {
                             ForEach(store.folders.sorted(by: { $0.sortOrder < $1.sortOrder })) { folder in
-                                let count = store.documents.filter { !$0.isTrashed && $0.folderId == folder.id }.count
+                                let count = store.visibleDocuments.filter { !$0.isTrashed && $0.folderId == folder.id }.count
                                 homeRow(icon: folder.iconName, title: folder.name, count: count) {
                                     onOpenAllDocs(folder.id, folder.name, false)
                                 }

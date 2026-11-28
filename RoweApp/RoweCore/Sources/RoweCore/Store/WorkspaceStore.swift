@@ -989,12 +989,22 @@ public final class WorkspaceStore {
 
     public func updateBlock(in docId: String, blockId: String, coalesceUndo: Bool = false, _ mutate: (inout Block) -> Void) {
         var mutatedTaskTitle: String? = nil
+        var updatedScheduleDate: Date? = nil
         mutateBlocks(in: docId, coalesceUndo: coalesceUndo) { blocks in
             _ = Self.mutateBlockRecursive(in: &blocks, id: blockId) { block in
                 mutate(&block)
                 if block.isTask {
                     mutatedTaskTitle = block.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    updatedScheduleDate = block.task?.scheduleDate
                 }
+            }
+        }
+        if let newDate = updatedScheduleDate,
+           let doc = documents.first(where: { $0.id == docId }),
+           doc.isHiddenTaskDocument {
+            let targetDocId = Self.taskDayDocumentId(for: newDate)
+            if targetDocId != docId {
+                moveTaskBlock(blockId: blockId, fromDocId: docId, toDay: newDate)
             }
         }
         if let title = mutatedTaskTitle {
@@ -1261,7 +1271,97 @@ public final class WorkspaceStore {
         enterInlineEditing(blockId: lastBlockId, utf16Offset: lastCaretOffset)
     }
 
-    // MARK: - Tasks & Calendar
+    // MARK: - Tasks & Calendar (Per-Day Hidden Documents)
+
+    /// User-visible documents excluding hidden per-day calendar task documents.
+    public var visibleDocuments: [RoweDocument] {
+        documents.filter { !$0.isHiddenTaskDocument }
+    }
+
+    nonisolated public static func taskDayDateKey(for date: Date) -> String {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", comps.year ?? 2026, comps.month ?? 1, comps.day ?? 1)
+    }
+
+    nonisolated public static func taskDayDocumentId(for date: Date) -> String {
+        "\(RoweDocument.taskDayDocumentIdPrefix)\(taskDayDateKey(for: date))"
+    }
+
+    nonisolated public static func taskDayDocumentTitle(for date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, yyyy"
+        return "Tasks · \(f.string(from: date))"
+    }
+
+    /// Returns or creates the deterministic hidden document storing all calendar tasks for `date`.
+    @discardableResult
+    public func ensureTaskDayDocument(for date: Date) -> RoweDocument {
+        let normalized = Calendar.current.startOfDay(for: date)
+        let key = Self.taskDayDateKey(for: normalized)
+        let docId = Self.taskDayDocumentId(for: normalized)
+        if let existingIdx = documents.firstIndex(where: { $0.id == docId }) {
+            if documents[existingIdx].isTrashed {
+                documents[existingIdx].isTrashed = false
+            }
+            documents[existingIdx].isTaskDayDocument = true
+            documents[existingIdx].taskDayDateKey = key
+            return documents[existingIdx]
+        }
+        let doc = RoweDocument(
+            id: docId,
+            spaceId: space.id,
+            folderId: nil,
+            title: Self.taskDayDocumentTitle(for: normalized),
+            blocks: [],
+            isTaskDayDocument: true,
+            taskDayDateKey: key,
+            authorName: space.authorName
+        )
+        documents.append(doc)
+        persistAndReindex(doc, fastSync: true)
+        return doc
+    }
+
+    /// Moves a task block from one hidden day doc to another, leaving a CRDT tombstone in the old day doc
+    /// so offline sync cleanly propagates cross-day reschedules without duplicating tasks.
+    private func moveTaskBlock(blockId: String, fromDocId: String, toDay targetDay: Date, newSortOrder: Double? = nil) {
+        guard let sourceIdx = documents.firstIndex(where: { $0.id == fromDocId }),
+              let blockIdx = documents[sourceIdx].blocks.firstIndex(where: { $0.id == blockId }) else {
+            return
+        }
+        let normalizedDay = Calendar.current.startOfDay(for: targetDay)
+        let targetDoc = ensureTaskDayDocument(for: normalizedDay)
+        guard targetDoc.id != fromDocId,
+              let targetIdx = documents.firstIndex(where: { $0.id == targetDoc.id }) else {
+            return
+        }
+        let now = Date()
+        var moved = documents[sourceIdx].blocks[blockIdx]
+        moved.documentId = targetDoc.id
+        moved.deletedAt = nil
+        if let newSortOrder { moved.sortOrder = newSortOrder }
+        moved.updatedAt = now
+        var meta = moved.task ?? TaskMetadata(state: .pending, isInbox: true)
+        meta.scheduleDate = normalizedDay
+        moved.task = meta
+
+        // Tombstone in old day document so CRDT merge removes it on other devices
+        documents[sourceIdx].blocks[blockIdx].deletedAt = now
+        documents[sourceIdx].blocks[blockIdx].updatedAt = now
+        documents[sourceIdx].updatedAt = now
+
+        if let existingTargetIdx = documents[targetIdx].blocks.firstIndex(where: { $0.id == moved.id }) {
+            documents[targetIdx].blocks[existingTargetIdx] = moved
+        } else {
+            documents[targetIdx].blocks.append(moved)
+        }
+        documents[targetIdx].blocks.sort(by: Block.canonicalTaskOrderComparator)
+        documents[targetIdx].updatedAt = now
+
+        persistAndReindex(documents[sourceIdx], fastSync: true)
+        persistAndReindex(documents[targetIdx], fastSync: true)
+    }
 
     public func allTasks() -> [ResolvedTaskItem] {
         var result: [ResolvedTaskItem] = []
@@ -1273,7 +1373,7 @@ public final class WorkspaceStore {
                             block: b,
                             documentId: doc.id,
                             documentTitle: doc.displayTitle,
-                            isInbox: b.task?.isInbox ?? (doc.title == "Tasks Inbox")
+                            isInbox: b.task?.isInbox ?? doc.isHiddenTaskDocument
                         ))
                     }
                     collect(b.subblocks)
@@ -1304,22 +1404,18 @@ public final class WorkspaceStore {
         repeatRule: RepeatRule? = nil,
         attachedImagesBase64: [String] = []
     ) -> ResolvedTaskItem {
-        let inboxDoc: RoweDocument
-        if let existing = documents.first(where: { $0.title == "Tasks Inbox" && !$0.isTrashed }) {
-            inboxDoc = existing
-        } else {
-            inboxDoc = createDocument(title: "Tasks Inbox", folderId: folders.first?.id, openImmediately: false)
-        }
+        let targetDay = Calendar.current.startOfDay(for: scheduleDate ?? Date())
+        let dayDoc = ensureTaskDayDocument(for: targetDay)
         let now = Date()
-        let maxExistingOrder = inboxDoc.blocks.filter(\.isTaskOrTombstone).map(\.effectiveSortOrder).max()
+        let maxExistingOrder = dayDoc.blocks.filter(\.isTaskOrTombstone).map(\.effectiveSortOrder).max()
         let nextSortOrder = max(now.timeIntervalSince1970, (maxExistingOrder ?? (now.timeIntervalSince1970 - 1.0)) + 1.0)
         let block = Block(
-            documentId: inboxDoc.id,
+            documentId: dayDoc.id,
             content: title,
             listStyle: .todo,
             task: TaskMetadata(
                 state: .pending,
-                scheduleDate: scheduleDate,
+                scheduleDate: targetDay,
                 deadlineDate: deadlineDate,
                 repeatRule: repeatRule,
                 isInbox: true,
@@ -1328,13 +1424,14 @@ public final class WorkspaceStore {
             updatedAt: now,
             sortOrder: nextSortOrder
         )
-        mutateBlocks(in: inboxDoc.id) { blocks in
+        mutateBlocks(in: dayDoc.id) { blocks in
             blocks.append(block)
+            blocks.sort(by: Block.canonicalTaskOrderComparator)
         }
         scheduleDebouncedCloudSync(delayOverride: 0.05)
         onTaskMutatedForLiveSync?(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New task" : title)
-        let item = ResolvedTaskItem(block: block, documentId: inboxDoc.id, documentTitle: inboxDoc.displayTitle, isInbox: true)
-        if !inboxDoc.isLocked, let candidate = NudgeCandidateTask(from: item, in: inboxDoc) {
+        let item = ResolvedTaskItem(block: block, documentId: dayDoc.id, documentTitle: dayDoc.displayTitle, isInbox: true)
+        if !dayDoc.isLocked, let candidate = NudgeCandidateTask(from: item, in: dayDoc) {
             Task { await self.estimateAndCacheDuration(for: candidate) }
         }
         return item
@@ -1431,15 +1528,26 @@ public final class WorkspaceStore {
         }
 
         let now = Date()
+        let sourceDoc = documents[sourceDocIdx]
+        if sourceDoc.isHiddenTaskDocument {
+            let targetDocId = Self.taskDayDocumentId(for: normalizedDay)
+            if targetDocId != sourceDoc.id {
+                let title = sourceDoc.blocks[sourceBlockIdx].content
+                moveTaskBlock(blockId: sourceBlockId, fromDocId: sourceDoc.id, toDay: normalizedDay, newSortOrder: newSortOrder)
+                onTaskMutatedForLiveSync?(title.isEmpty ? "Task rescheduled" : title)
+                return
+            }
+        }
+
         var block = documents[sourceDocIdx].blocks[sourceBlockIdx]
-        var meta = block.task ?? TaskMetadata(state: .pending, isInbox: documents[sourceDocIdx].title == "Tasks Inbox")
+        var meta = block.task ?? TaskMetadata(state: .pending, isInbox: sourceDoc.isHiddenTaskDocument)
         meta.scheduleDate = normalizedDay
         block.task = meta
         block.sortOrder = newSortOrder
         block.updatedAt = now
         documents[sourceDocIdx].blocks[sourceBlockIdx] = block
 
-        if documents[sourceDocIdx].title == "Tasks Inbox" {
+        if documents[sourceDocIdx].isHiddenTaskDocument {
             documents[sourceDocIdx].blocks.sort(by: Block.canonicalTaskOrderComparator)
         } else if let targetBlockId, sourceBlockId != targetBlockId,
                   let targetBlockIdx = documents[sourceDocIdx].blocks.firstIndex(where: { $0.id == targetBlockId }) {
@@ -2230,7 +2338,8 @@ public final class WorkspaceStore {
                     decodedRemoteBlocks = decoded
                 }
 
-                let isTaskContainer = localDoc.title == "Tasks Inbox" || r.title == "Tasks Inbox"
+                let isTaskContainer = localDoc.isHiddenTaskDocument || r.id.hasPrefix(RoweDocument.taskDayDocumentIdPrefix)
+                    || r.title == "Tasks Inbox"
                     || localDoc.blocks.contains(where: \.isTaskOrTombstone)
                     || (decodedRemoteBlocks?.contains(where: \.isTaskOrTombstone) ?? false)
 
@@ -2361,37 +2470,40 @@ public final class WorkspaceStore {
         return surviving.sorted(by: Block.canonicalTaskOrderComparator)
     }
 
-    /// Merges duplicate "Tasks Inbox" AND any legacy "Tasks Inbox (Sync Conflict)" documents via CRDT
-    /// so tasks never double across devices.
+    /// Migrates any legacy "Tasks Inbox" / "Tasks Inbox (Sync Conflict)" tasks into hidden per-day
+    /// `tasks-day-YYYY-MM-DD` documents via CRDT merge, and retires the legacy single-file inbox docs.
     private func deduplicateInboxAndSeedDocuments() {
-        let inboxIndices = documents.indices.filter {
-            !documents[$0].isTrashed && (documents[$0].title == "Tasks Inbox" || documents[$0].title.hasPrefix("Tasks Inbox (Sync Conflict)"))
+        let legacyInboxDocs = documents.filter {
+            !$0.isTrashed && ($0.title == "Tasks Inbox" || $0.title.hasPrefix("Tasks Inbox (Sync Conflict)"))
         }
-        if inboxIndices.count > 1 {
-            let canonicalIdx = inboxIndices.first(where: { documents[$0].id == "rowe-seed-inbox" })
-                ?? inboxIndices.first(where: { documents[$0].title == "Tasks Inbox" })
-                ?? inboxIndices[0]
-            let canonicalId = documents[canonicalIdx].id
-            var mergedBlocks = documents[canonicalIdx].blocks
-            var duplicateIdsToRemove: [String] = []
-
-            for idx in inboxIndices where idx != canonicalIdx {
-                mergedBlocks = Self.mergeTaskBlocksCRDT(local: mergedBlocks, remote: documents[idx].blocks, documentId: canonicalId)
-                duplicateIdsToRemove.append(documents[idx].id)
+        if !legacyInboxDocs.isEmpty {
+            var allLegacyBlocks: [Block] = []
+            for doc in legacyInboxDocs {
+                allLegacyBlocks = Self.mergeTaskBlocksCRDT(local: allLegacyBlocks, remote: doc.blocks, documentId: doc.id)
             }
-
-            let deduped = deduplicatedTaskBlocks(mergedBlocks, documentId: canonicalId)
-            documents[canonicalIdx].title = "Tasks Inbox"
-            documents[canonicalIdx].blocks = deduped
-            documents[canonicalIdx].updatedAt = Date()
-            let removeSet = Set(duplicateIdsToRemove)
-            documents.removeAll(where: { removeSet.contains($0.id) })
-            dirtyDocumentIds.insert(canonicalId)
-            dirtyDocumentVersions[canonicalId, default: 0] &+= 1
+            let deduped = deduplicatedTaskBlocks(allLegacyBlocks, documentId: "legacy-migration")
+            var groupedByDay: [Date: [Block]] = [:]
+            let cal = Calendar.current
+            for blk in deduped where blk.isTaskOrTombstone {
+                let day = cal.startOfDay(for: blk.task?.scheduleDate ?? blk.updatedAt)
+                groupedByDay[day, default: []].append(blk)
+            }
+            for (day, dayBlocks) in groupedByDay {
+                let targetDoc = ensureTaskDayDocument(for: day)
+                if let idx = documents.firstIndex(where: { $0.id == targetDoc.id }) {
+                    let merged = Self.mergeTaskBlocksCRDT(local: documents[idx].blocks, remote: dayBlocks, documentId: targetDoc.id)
+                    documents[idx].blocks = merged
+                    documents[idx].updatedAt = Date()
+                    dirtyDocumentIds.insert(targetDoc.id)
+                    dirtyDocumentVersions[targetDoc.id, default: 0] &+= 1
+                }
+            }
+            let legacyIds = Set(legacyInboxDocs.map(\.id))
+            documents.removeAll(where: { legacyIds.contains($0.id) })
             if authSession != nil {
-                for dupId in duplicateIdsToRemove {
-                    pendingRemoteDeleteIds.insert(dupId)
-                    Task { await deleteRemoteDocument(docId: dupId) }
+                for oldId in legacyIds {
+                    pendingRemoteDeleteIds.insert(oldId)
+                    Task { await deleteRemoteDocument(docId: oldId) }
                 }
             }
         }

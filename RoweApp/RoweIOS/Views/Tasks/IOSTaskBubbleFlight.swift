@@ -3,16 +3,8 @@ import SwiftUI
 import UIKit
 import RoweCore
 
-enum TaskBubbleFlightDirection: Equatable {
-    /// Text inside Composer -> bubble blooms right around text -> glides to exact row text slot -> bubble collapses into 19×19 checkbox
-    case settleToRow
-    /// Task Row -> 19×19 checkbox un-bubbles & scoops text -> glides straight to Composer text slot -> Composer unfolds around it
-    case openForEdit
-}
-
 struct TaskBubbleFlightPayload: Identifiable {
     let id: UUID = UUID()
-    let direction: TaskBubbleFlightDirection
     let blockId: String
     let title: String
     let scheduleDate: Date
@@ -21,21 +13,18 @@ struct TaskBubbleFlightPayload: Identifiable {
     let isInbox: Bool
     let accentColor: Color
     let isDarkMode: Bool
-    /// Exact global frame of the composer's TextField (forward) or tapped row (reverse)
     let textOriginFrame: CGRect
-    /// Full composer card frame (used to gently fade out the surrounding card chrome)
     let composerCardFrame: CGRect
     let measuredTextSize: CGSize
     let startTime: Date
     let backdropSnapshot: UIImage?
 }
 
-/// Coordinates both directions of the text-anchored Liquid Glass Bubble choreography on iOS:
-/// - Forward (`.settleToRow`): Bubble blooms tightly around the actual task text (e.g. just "hi" or "do homework")
-///   while the surrounding composer card fades away, flies straight to the task's destination text slot, and collapses
-///   pixel-for-pixel into the 19×19 checkbox (no shimmer).
-/// - Reverse (`.openForEdit`): 19×19 checkbox un-bubbles into a text-sized bubble, scoops up the task text,
-///   and flies directly to the leading text slot inside the above-keyboard Task Composer.
+/// Coordinates the forward Liquid Glass Bubble flight on iOS:
+/// From `t = 0`, the glass bubble travels continuously along a smooth arc directly toward the
+/// 19×19 checkbox (never pausing or hovering around the text), shrinking smoothly into the checkbox
+/// while refracting whatever lies along its path. Meanwhile, the task text glides independently
+/// into its destination row slot.
 @MainActor
 @Observable
 final class IOSTaskFlightCoordinator {
@@ -48,8 +37,7 @@ final class IOSTaskFlightCoordinator {
     @ObservationIgnored weak var snapshotSourceView: UIView?
     @ObservationIgnored private var completionTask: Task<Void, Never>?
 
-    static let forwardTotalDuration: TimeInterval = 0.62
-    static let reverseTotalDuration: TimeInterval = 0.42
+    nonisolated static let forwardTotalDuration: TimeInterval = 0.50
 
     func shouldHideRow(_ blockId: String) -> Bool {
         hiddenLandingBlockId == blockId || activeEditingBlockId == blockId
@@ -98,7 +86,7 @@ final class IOSTaskFlightCoordinator {
         }
     }
 
-    /// Launches the forward Text-Anchored Bubble -> Destination Row -> Exact 19×19 Checkbox flight.
+    /// Launches the direct Composer -> Checkbox Liquid Glass Bubble flight (zero hover/wait).
     func launchSettleToRow(
         blockId: String,
         title: String,
@@ -118,7 +106,6 @@ final class IOSTaskFlightCoordinator {
         let measured = Self.measureTaskText(title, maxWidth: maxTextW)
 
         let payload = TaskBubbleFlightPayload(
-            direction: .settleToRow,
             blockId: blockId,
             title: title,
             scheduleDate: Calendar.current.startOfDay(for: scheduleDate),
@@ -144,49 +131,6 @@ final class IOSTaskFlightCoordinator {
         }
     }
 
-    /// Launches the reverse Row -> Checkbox Un-Bubbles & Scoops Text -> Above-Keyboard Composer Text Slot flight.
-    func launchOpenForEdit(
-        item: ResolvedTaskItem,
-        accentColor: Color,
-        isDarkMode: Bool,
-        onReadyForComposer: @escaping () -> Void
-    ) {
-        let rowFrame = rowFrames[item.block.id] ?? CGRect(x: 0, y: 220, width: UIScreen.main.bounds.width, height: 40)
-        completionTask?.cancel()
-        hiddenLandingBlockId = item.block.id
-        let snapshot = captureBackdropSnapshot()
-        let title = item.block.content.isEmpty ? "Untitled Task" : item.block.content
-        let maxTextW = max(160, rowFrame.width - 96)
-        let measured = Self.measureTaskText(title, maxWidth: maxTextW)
-
-        let payload = TaskBubbleFlightPayload(
-            direction: .openForEdit,
-            blockId: item.block.id,
-            title: title,
-            scheduleDate: Calendar.current.startOfDay(for: item.block.task?.scheduleDate ?? Date()),
-            hasRepeat: item.block.task?.repeatRule != nil,
-            imageCount: item.block.task?.attachedImagesBase64.count ?? 0,
-            isInbox: item.isInbox,
-            accentColor: accentColor,
-            isDarkMode: isDarkMode,
-            textOriginFrame: rowFrame,
-            composerCardFrame: .zero,
-            measuredTextSize: measured,
-            startTime: Date(),
-            backdropSnapshot: snapshot
-        )
-        activeFlight = payload
-        IOSHaptics.shared.playBubbleOpenForEditHaptic()
-
-        completionTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.reverseTotalDuration * 1_000_000_000))
-            guard !Task.isCancelled, let self, self.activeFlight?.id == payload.id else { return }
-            onReadyForComposer()
-            self.activeFlight = nil
-            self.hiddenLandingBlockId = nil
-        }
-    }
-
     func destinationFrame(for payload: TaskBubbleFlightPayload, in screenSize: CGSize) -> CGRect {
         if let exact = rowFrames[payload.blockId], exact.width > 20, exact.height > 10 {
             return exact
@@ -203,11 +147,11 @@ final class IOSTaskFlightCoordinator {
     }
 }
 
-/// Per-frame optical & geometric state evaluated at 120fps for text-anchored forward and reverse flights.
+/// Per-frame optical & geometric state evaluated at 120fps:
+/// The bubble moves continuously toward `checkboxCenter` from t=0 without ever hovering around the text.
 private struct TaskBubbleFrameMetrics {
     let center: CGPoint
     let textCenter: CGPoint
-    let textPower: Double
     let halfSize: CGSize
     let cornerRadius: CGFloat
     let power: Double
@@ -215,10 +159,8 @@ private struct TaskBubbleFrameMetrics {
     let wobblePhase: Double
     let wobbleAmp: Double
     let bubbleOpacity: Double
-    let fadingComposerRect: CGRect
-    let fadingComposerOpacity: Double
-    let refractedTextOpacity: Double
-    let settlingTextOpacity: Double
+    let flyingTextOpacity: Double
+    let settlingRowOpacity: Double
     let rowFrame: CGRect
 
     static let checkboxSize: CGFloat = 19
@@ -229,14 +171,19 @@ private struct TaskBubbleFrameMetrics {
         elapsed t: TimeInterval,
         payload: TaskBubbleFlightPayload,
         rowFrame: CGRect,
-        screenSize: CGSize,
-        targetComposerBottomInset: CGFloat,
-        liveComposerFrame: CGRect
+        screenSize: CGSize
     ) -> TaskBubbleFrameMetrics {
+        let total = IOSTaskFlightCoordinator.forwardTotalDuration
+        let u = clamp(t / total)
+
+        let cardRect = payload.composerCardFrame.width > 40
+            ? payload.composerCardFrame
+            : CGRect(x: 14, y: screenSize.height * 0.42, width: screenSize.width - 28, height: 152)
+
         let textW = payload.measuredTextSize.width
         let textH = payload.measuredTextSize.height
-        let bubbleW = min(max(textW + 44, 68), min(230, screenSize.width - 48))
-        let bubbleH = min(max(textH + 30, 50), 82)
+        let dropletW = min(max(textW * 0.55 + 32, 54), 110)
+        let dropletH = min(max(textH + 22, 46), 68)
 
         let checkboxCenter = CGPoint(x: rowFrame.minX + 18 + checkboxSize * 0.5, y: rowFrame.midY)
         let clampedRowTextW = min(textW, max(40, rowFrame.width - textLeadingOffsetInRow - 48))
@@ -245,122 +192,56 @@ private struct TaskBubbleFrameMetrics {
             y: rowFrame.midY
         )
 
-        switch payload.direction {
-        case .settleToRow:
-            return evaluateForward(
-                t: t,
-                payload: payload,
-                rowFrame: rowFrame,
-                checkboxCenter: checkboxCenter,
-                rowTextCenter: rowTextCenter,
-                bubbleW: bubbleW,
-                bubbleH: bubbleH,
-                screenSize: screenSize
-            )
-        case .openForEdit:
-            return evaluateReverse(
-                t: t,
-                payload: payload,
-                rowFrame: rowFrame,
-                checkboxCenter: checkboxCenter,
-                rowTextCenter: rowTextCenter,
-                bubbleW: bubbleW,
-                bubbleH: bubbleH,
-                screenSize: screenSize,
-                targetComposerBottomInset: targetComposerBottomInset,
-                liveComposerFrame: liveComposerFrame
-            )
-        }
-    }
-
-    private static func evaluateForward(
-        t: TimeInterval,
-        payload: TaskBubbleFlightPayload,
-        rowFrame: CGRect,
-        checkboxCenter: CGPoint,
-        rowTextCenter: CGPoint,
-        bubbleW: CGFloat,
-        bubbleH: CGFloat,
-        screenSize: CGSize
-    ) -> TaskBubbleFrameMetrics {
-        let cardRect = payload.composerCardFrame.width > 40
-            ? payload.composerCardFrame
-            : CGRect(x: 14, y: screenSize.height * 0.42, width: screenSize.width - 28, height: 152)
-
         let tfOriginX = payload.textOriginFrame.width > 20 ? payload.textOriginFrame.minX : (cardRect.minX + 18)
         let tfMidY = payload.textOriginFrame.height > 10 ? payload.textOriginFrame.midY : (cardRect.minY + 66)
-        let rawTextCenterX = tfOriginX + payload.measuredTextSize.width * 0.5
-        let clampedStartX = min(max(rawTextCenterX, bubbleW * 0.5 + 8), screenSize.width - bubbleW * 0.5 - 8)
-        let textStartCenter = CGPoint(x: clampedStartX, y: tfMidY)
-
-        // Composer itself turns into the bubble and rapidly wraps around the text WHILE already traveling
-        let wrapU = clamp(t / 0.20)
-        let wrap = smoothstep(wrapU)
-
-        let flightU = clamp(t / 0.44)
-        let flight = springEase(flightU)
-
-        // Late path divergence right before arrival: bubble curves into checkbox, text glides into row slot
-        let divergeU = clamp((t - 0.34) / 0.24)
-        let diverge = smoothstep(divergeU)
-
-        let flightArc = sin(flightU * .pi)
-        let stretch = CGFloat(flightArc * 0.07 * wrap * (1.0 - diverge))
-        let tightW = bubbleW * (1.0 - stretch * 0.35)
-        let tightH = bubbleH * (1.0 + stretch)
-        let wrappedW = lerp(cardRect.width, tightW, wrap)
-        let wrappedH = lerp(cardRect.height, tightH, wrap)
-        let currentW = lerp(wrappedW, checkboxSize, diverge)
-        let currentH = lerp(wrappedH, checkboxSize, diverge)
-
-        let bubbleCorner = min(tightW, tightH) * 0.5
-        let wrappedCorner = lerp(24.0, bubbleCorner, wrap)
-        let cornerRadius = lerp(wrappedCorner, checkboxCorner, diverge)
-
-        let approachTarget = CGPoint(
-            x: lerp(rowTextCenter.x, checkboxCenter.x, 0.32),
-            y: rowTextCenter.y
+        let textStartCenter = CGPoint(
+            x: min(max(tfOriginX + textW * 0.5, 24), screenSize.width - 24),
+            y: tfMidY
         )
-        let liftY = -12.0 * CGFloat(flightArc)
-        let textTravelPos = CGPoint(
-            x: lerp(textStartCenter.x, approachTarget.x, flight),
-            y: lerp(textStartCenter.y, approachTarget.y, flight) + liftY
-        )
-        let cardCenter = CGPoint(x: cardRect.midX, y: cardRect.midY)
-        let cardFlightCenter = CGPoint(
-            x: lerp(cardCenter.x, textTravelPos.x, wrap),
-            y: lerp(cardCenter.y, textTravelPos.y, wrap)
-        )
+        let bubbleStartCenter = CGPoint(x: cardRect.midX, y: cardRect.midY)
 
-        let bubbleBranchArc = -6.0 * CGFloat(sin(divergeU * .pi))
-        let currentCenter = CGPoint(
-            x: lerp(cardFlightCenter.x, checkboxCenter.x, diverge),
-            y: lerp(cardFlightCenter.y, checkboxCenter.y, diverge) + bubbleBranchArc
+        // Bubble continuously curves straight from composer to checkboxCenter (quadratic Bezier, zero hover!)
+        let bubbleProgress = easeInOutCubic(u)
+        let controlPoint = CGPoint(
+            x: lerp(bubbleStartCenter.x, checkboxCenter.x, 0.35) - 24,
+            y: min(bubbleStartCenter.y, checkboxCenter.y) - 18
         )
+        let currentCenter = quadBezier(bubbleStartCenter, controlPoint, checkboxCenter, t: bubbleProgress)
+
+        // Size smoothly contracts: composer card -> liquid droplet -> exact 19×19 checkbox
+        let condense = smoothstep(clamp(u / 0.28))
+        let shrinkToCheckbox = smoothstep(clamp((u - 0.14) / 0.86))
+        let arcStretch = sin(u * .pi) * 0.08 * (1.0 - shrinkToCheckbox)
+        let midW = lerp(cardRect.width, dropletW * (1.0 - CGFloat(arcStretch * 0.3)), condense)
+        let midH = lerp(cardRect.height, dropletH * (1.0 + CGFloat(arcStretch)), condense)
+        let currentW = lerp(midW, checkboxSize, shrinkToCheckbox)
+        let currentH = lerp(midH, checkboxSize, shrinkToCheckbox)
+
+        let dropletCorner = min(dropletW, dropletH) * 0.5
+        let midCorner = lerp(24.0, dropletCorner, condense)
+        let cornerRadius = lerp(midCorner, checkboxCorner, shrinkToCheckbox)
+
+        // Task text independently glides straight from composer text slot to row text slot
+        let textProgress = easeOutCubic(clamp(u / 0.78))
         let textCenter = CGPoint(
-            x: lerp(textTravelPos.x, rowTextCenter.x, diverge),
-            y: lerp(textTravelPos.y, rowTextCenter.y, diverge)
+            x: lerp(textStartCenter.x, rowTextCenter.x, textProgress),
+            y: lerp(textStartCenter.y, rowTextCenter.y, textProgress) - 8.0 * CGFloat(sin(textProgress * .pi))
         )
 
-        let wobbleFade = 1.0 - smoothstep(clamp(divergeU / 0.85))
-        let opticalRamp = 0.25 + 0.75 * wrap
-        let opticalEnv = opticalRamp * (1.0 - diverge * 0.85)
-        let power = 0.84 * opticalEnv
-        let dispersion = 0.92 * opticalEnv
-        let wobbleAmp = 0.95 * wrap * wobbleFade
-        let wobblePhase = t * 7.6
+        let opticalEnv = (0.35 + 0.65 * condense) * (1.0 - smoothstep(clamp((u - 0.76) / 0.24)) * 0.78)
+        let power = 0.88 * opticalEnv
+        let dispersion = 0.72 * opticalEnv
+        let wobbleAmp = 0.90 * condense * (1.0 - shrinkToCheckbox)
+        let wobblePhase = t * 8.2
 
-        let bubbleOpacity = 1.0 - smoothstep(clamp((t - 0.58) / 0.04))
-
-        let textPower = power * wrap * (1.0 - smoothstep(clamp(divergeU / 0.72)))
-        let textHandoff = smoothstep(clamp((t - 0.50) / 0.09))
-        let refractedTextOpacity = (1.0 - textHandoff) * (1.0 - smoothstep(clamp((t - 0.58) / 0.04)))
-        let settlingTextOpacity = t < 0.62 ? textHandoff : 0.0
+        let bubbleOpacity = 1.0 - smoothstep(clamp((u - 0.90) / 0.10))
+        let textHandoff = smoothstep(clamp((u - 0.72) / 0.18))
+        let flyingTextOpacity = 1.0 - textHandoff
+        let settlingRowOpacity = textHandoff
 
         return TaskBubbleFrameMetrics(
             center: currentCenter,
             textCenter: textCenter,
-            textPower: textPower,
             halfSize: CGSize(width: currentW * 0.5, height: currentH * 0.5),
             cornerRadius: cornerRadius,
             power: power,
@@ -368,132 +249,30 @@ private struct TaskBubbleFrameMetrics {
             wobblePhase: wobblePhase,
             wobbleAmp: wobbleAmp,
             bubbleOpacity: bubbleOpacity,
-            fadingComposerRect: .zero,
-            fadingComposerOpacity: 0.0,
-            refractedTextOpacity: refractedTextOpacity,
-            settlingTextOpacity: settlingTextOpacity,
-            rowFrame: rowFrame
-        )
-    }
-
-    private static func evaluateReverse(
-        t: TimeInterval,
-        payload: TaskBubbleFlightPayload,
-        rowFrame: CGRect,
-        checkboxCenter: CGPoint,
-        rowTextCenter: CGPoint,
-        bubbleW: CGFloat,
-        bubbleH: CGFloat,
-        screenSize: CGSize,
-        targetComposerBottomInset: CGFloat,
-        liveComposerFrame: CGRect
-    ) -> TaskBubbleFrameMetrics {
-        let composerRect: CGRect = {
-            if liveComposerFrame.width > 120 && liveComposerFrame.height > 60 {
-                return liveComposerFrame
-            }
-            let composerW = max(260, screenSize.width - 28)
-            let composerH: CGFloat = 152
-            return CGRect(
-                x: (screenSize.width - composerW) * 0.5,
-                y: screenSize.height - targetComposerBottomInset - composerH,
-                width: composerW,
-                height: composerH
-            )
-        }()
-        let destTextOriginX = composerRect.minX + 18
-        let destTextMidY = composerRect.minY + 66
-        let rawDestX = destTextOriginX + payload.measuredTextSize.width * 0.5
-        let destTextCenter = CGPoint(
-            x: min(max(rawDestX, bubbleW * 0.5 + 8), screenSize.width - bubbleW * 0.5 - 8),
-            y: destTextMidY
-        )
-
-        let convergeU = clamp(t / 0.16)
-        let converge = smoothstep(convergeU)
-        let flightU = clamp((t - 0.04) / 0.30)
-        let flight = springEase(flightU)
-        let unwrapU = clamp((t - 0.24) / 0.18)
-        let unwrap = smoothstep(unwrapU)
-
-        let midW = lerp(checkboxSize, bubbleW, converge)
-        let midH = lerp(checkboxSize, bubbleH, converge)
-        let currentW = lerp(midW, composerRect.width, unwrap)
-        let currentH = lerp(midH, composerRect.height, unwrap)
-        let bubbleCorner = min(bubbleW, bubbleH) * 0.5
-        let midCorner = lerp(checkboxCorner, bubbleCorner, converge)
-        let cornerRadius = lerp(midCorner, 24.0, unwrap)
-
-        let approachOrigin = CGPoint(
-            x: lerp(rowTextCenter.x, checkboxCenter.x, 0.32),
-            y: rowTextCenter.y
-        )
-        let flightArc = sin(flightU * .pi)
-        let sharedPos = CGPoint(
-            x: lerp(approachOrigin.x, destTextCenter.x, flight),
-            y: lerp(approachOrigin.y, destTextCenter.y, flight) - 12.0 * CGFloat(flightArc)
-        )
-
-        let bubbleMergeArc = -6.0 * CGFloat(sin(convergeU * .pi))
-        let mergedBubblePos = CGPoint(
-            x: lerp(checkboxCenter.x, sharedPos.x, converge),
-            y: lerp(checkboxCenter.y, sharedPos.y, converge) + bubbleMergeArc
-        )
-        let composerCenter = CGPoint(x: composerRect.midX, y: composerRect.midY)
-        let currentCenter = CGPoint(
-            x: lerp(mergedBubblePos.x, composerCenter.x, unwrap),
-            y: lerp(mergedBubblePos.y, composerCenter.y, unwrap)
-        )
-        let textCenter = CGPoint(
-            x: lerp(rowTextCenter.x, sharedPos.x, converge),
-            y: lerp(rowTextCenter.y, sharedPos.y, converge)
-        )
-
-        let opticalEnv = converge * (1.0 - unwrap * 0.72)
-        let power = 0.84 * opticalEnv
-        let dispersion = 0.90 * opticalEnv
-        let wobbleAmp = 0.95 * converge * (1.0 - unwrap)
-        let wobblePhase = -t * 7.6
-
-        let textPower = power * smoothstep(clamp(convergeU / 0.85)) * (1.0 - unwrap)
-        let textPickup = smoothstep(clamp(t / 0.06))
-        let settlingTextOpacity = 1.0 - textPickup
-        let refractedTextOpacity = textPickup * (1.0 - smoothstep(clamp((t - 0.36) / 0.06)))
-
-        return TaskBubbleFrameMetrics(
-            center: currentCenter,
-            textCenter: textCenter,
-            textPower: textPower,
-            halfSize: CGSize(width: currentW * 0.5, height: currentH * 0.5),
-            cornerRadius: cornerRadius,
-            power: power,
-            dispersion: dispersion,
-            wobblePhase: wobblePhase,
-            wobbleAmp: wobbleAmp,
-            bubbleOpacity: 1.0 - smoothstep(clamp((t - 0.37) / 0.05)),
-            fadingComposerRect: .zero,
-            fadingComposerOpacity: 0.0,
-            refractedTextOpacity: refractedTextOpacity,
-            settlingTextOpacity: settlingTextOpacity,
+            flyingTextOpacity: flyingTextOpacity,
+            settlingRowOpacity: settlingRowOpacity,
             rowFrame: rowFrame
         )
     }
 
     private static func clamp(_ v: Double) -> Double { min(max(v, 0), 1) }
     private static func smoothstep(_ t: Double) -> Double { t * t * (3 - 2 * t) }
+    private static func easeOutCubic(_ t: Double) -> Double { 1.0 - pow(1.0 - t, 3.0) }
+    private static func easeInOutCubic(_ t: Double) -> Double {
+        t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+    }
     private static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: Double) -> CGFloat { a + (b - a) * CGFloat(t) }
-
-    private static func springEase(_ u: Double) -> Double {
-        guard u > 0 else { return 0 }
-        guard u < 1 else { return 1 }
-        let raw = 1.0 - exp(-6.4 * u) * cos(4.6 * u)
-        let end = 1.0 - exp(-6.4) * cos(4.6)
-        return raw / end
+    private static func quadBezier(_ p0: CGPoint, _ p1: CGPoint, _ p2: CGPoint, t: Double) -> CGPoint {
+        let mt = 1.0 - t
+        let a = CGFloat(mt * mt)
+        let b = CGFloat(2.0 * mt * t)
+        let c = CGFloat(t * t)
+        return CGPoint(x: a * p0.x + b * p1.x + c * p2.x, y: a * p0.y + b * p1.y + c * p2.y)
     }
 }
 
-/// Pure SwiftUI overlay mounted above `CompactTabBarContainer` (zero UIKit `.layerEffect` conflicts),
-/// rendering text-anchored Forward (Composer Text -> Bubble -> 19×19 Checkbox) and Reverse (Row -> Un-Bubble -> Composer Text) flights.
+/// Pure SwiftUI overlay rendering the continuous Liquid Glass Bubble flight straight to the checkbox,
+/// refracting BOTH the underlying calendar backdrop AND the flying task text beneath the glass lens.
 struct IOSTaskBubbleFlightOverlay: View {
     @Bindable var coordinator: IOSTaskFlightCoordinator
     var targetComposerBottomInset: CGFloat = 324
@@ -504,39 +283,39 @@ struct IOSTaskBubbleFlightOverlay: View {
             TimelineView(.animation) { timeline in
                 GeometryReader { geo in
                     let elapsed = max(0, timeline.date.timeIntervalSince(payload.startTime))
-                    let rowFrame = payload.direction == .openForEdit
-                        ? payload.textOriginFrame
-                        : coordinator.destinationFrame(for: payload, in: geo.size)
+                    let rowFrame = coordinator.destinationFrame(for: payload, in: geo.size)
                     let m = TaskBubbleFrameMetrics.evaluate(
                         elapsed: elapsed,
                         payload: payload,
                         rowFrame: rowFrame,
-                        screenSize: geo.size,
-                        targetComposerBottomInset: targetComposerBottomInset,
-                        liveComposerFrame: liveComposerFrame
+                        screenSize: geo.size
                     )
 
                     ZStack {
-                        if m.fadingComposerOpacity > 0.01 && m.fadingComposerRect.width > 40 {
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .fill(.ultraThinMaterial)
-                                .frame(width: m.fadingComposerRect.width, height: m.fadingComposerRect.height)
-                                .position(x: m.fadingComposerRect.midX, y: m.fadingComposerRect.midY)
-                                .scaleEffect(0.96 + 0.04 * m.fadingComposerOpacity)
-                                .opacity(m.fadingComposerOpacity * 0.88)
-                                .allowsHitTesting(false)
-                        }
-
-                        if m.settlingTextOpacity > 0.01 {
+                        // Layer 1: Flying / settling task text (rendered beneath the glass bubble)
+                        if m.settlingRowOpacity > 0.01 {
                             rowTextWithoutCheckbox(payload: payload)
                                 .frame(width: rowFrame.width, height: rowFrame.height)
                                 .position(x: rowFrame.midX, y: rowFrame.midY)
-                                .opacity(m.settlingTextOpacity)
+                                .opacity(m.settlingRowOpacity)
                                 .allowsHitTesting(false)
                         }
 
+                        if m.flyingTextOpacity > 0.01 {
+                            Text(payload.title)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .frame(width: payload.measuredTextSize.width + 6, alignment: .leading)
+                                .position(m.textCenter)
+                                .opacity(m.flyingTextOpacity)
+                                .allowsHitTesting(false)
+                        }
+
+                        // Layer 2: Refracting Liquid Glass Bubble passing OVER backdrop + flying text straight to checkbox
                         if m.bubbleOpacity > 0.01 {
-                            Group {
+                            ZStack {
                                 if let snap = payload.backdropSnapshot {
                                     Image(uiImage: snap)
                                         .resizable()
@@ -545,7 +324,19 @@ struct IOSTaskBubbleFlightOverlay: View {
                                     Color(payload.isDarkMode ? .black : .white)
                                         .frame(width: geo.size.width, height: geo.size.height)
                                 }
+
+                                if m.flyingTextOpacity > 0.01 {
+                                    Text(payload.title)
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(width: payload.measuredTextSize.width + 6, alignment: .leading)
+                                        .position(m.textCenter)
+                                        .opacity(m.flyingTextOpacity)
+                                }
                             }
+                            .frame(width: geo.size.width, height: geo.size.height)
                             .compositingGroup()
                             .layerEffect(
                                 ShaderLibrary.taskBubbleLens(
@@ -562,54 +353,7 @@ struct IOSTaskBubbleFlightOverlay: View {
                                 maxSampleOffset: CGSize(width: 140, height: 140)
                             )
                             .allowsHitTesting(false)
-                        }
 
-                        if m.refractedTextOpacity > 0.01 {
-                            let textMaxW = max(payload.measuredTextSize.width + 16, 48)
-                            if m.textPower > 0.04 && m.halfSize.width > 18 {
-                                let pad: CGFloat = 140
-                                let sampleW = max(m.halfSize.width * 2, textMaxW) + pad * 2
-                                let sampleH = max(m.halfSize.height * 2, payload.measuredTextSize.height + 24) + pad * 2
-
-                                Text(payload.title)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(width: payload.measuredTextSize.width + 6, alignment: .leading)
-                                    .frame(width: sampleW, height: sampleH)
-                                    .compositingGroup()
-                                    .layerEffect(
-                                        ShaderLibrary.taskBubbleLens(
-                                            .float2(sampleW * 0.5, sampleH * 0.5),
-                                            .float2(m.halfSize.width, m.halfSize.height),
-                                            .float(m.cornerRadius),
-                                            .float(m.textPower * 0.68),
-                                            .float(m.dispersion * 0.85),
-                                            .float(m.wobblePhase),
-                                            .float(m.wobbleAmp),
-                                            .float(1.0),
-                                            .float(1.0)
-                                        ),
-                                        maxSampleOffset: CGSize(width: 140, height: 140)
-                                    )
-                                    .position(m.textCenter)
-                                    .opacity(m.refractedTextOpacity)
-                                    .allowsHitTesting(false)
-                            } else {
-                                Text(payload.title)
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(width: payload.measuredTextSize.width + 6, alignment: .leading)
-                                    .position(m.textCenter)
-                                    .opacity(m.refractedTextOpacity)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-
-                        if m.bubbleOpacity > 0.01 {
                             RoundedRectangle(cornerRadius: m.cornerRadius, style: .continuous)
                                 .stroke(
                                     LinearGradient(

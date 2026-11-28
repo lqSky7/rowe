@@ -217,11 +217,6 @@ struct IOSCalendarTasksView: View {
                         }) { newState in
                             handleTaskStateChange(item: item, newState: newState)
                         }
-                        .iosDownsyncTaskShimmer(
-                            isHighlighted: isDownsynced,
-                            triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
-                            isDarkMode: colorScheme == .dark
-                        )
                         .opacity(isHidden ? 0 : 1)
                         .onGeometryChange(for: CGRect.self) { proxy in
                             proxy.frame(in: .global)
@@ -316,11 +311,6 @@ struct IOSCalendarTasksView: View {
                     }) { newState in
                         handleTaskStateChange(item: item, newState: newState)
                     }
-                    .iosDownsyncTaskShimmer(
-                        isHighlighted: isDownsynced,
-                        triggerId: downsyncWaveCoordinator?.shimmerTriggerId ?? UUID(),
-                        isDarkMode: colorScheme == .dark
-                    )
                     .opacity(isHidden ? 0 : 1)
                     .onGeometryChange(for: CGRect.self) { proxy in
                         proxy.frame(in: .global)
@@ -431,12 +421,12 @@ struct IOSTaskRow: View {
                     )
                 if state == .completed && !redFlash {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(store.settings.accentColor.prefersDarkForeground(isDark: colorScheme == .dark) ? Color.black.opacity(0.88) : Color.white)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 } else if state == .canceled || redFlash {
                     Image(systemName: "xmark")
-                        .font(.system(size: 9.5, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
@@ -644,8 +634,9 @@ struct IOSQuickAddTaskCard: View {
     @Bindable var store: WorkspaceStore
     let editingItem: ResolvedTaskItem?
     var embedGlassBackground: Bool = true
-    var immediateFocus: Bool = false
+    var immediateFocus: Bool = true
     var onCreatedTaskForFlight: ((ResolvedTaskItem, CGRect, CGRect) -> Void)? = nil
+    var onOpenDayDocument: ((String) -> Void)? = nil
     var onClose: () -> Void
 
     private static let prompts: [String] = [
@@ -668,6 +659,7 @@ struct IOSQuickAddTaskCard: View {
     @State private var didCopyPreviewImage: Bool = false
     @State private var cardFrame: CGRect = .zero
     @State private var textFieldFrame: CGRect = .zero
+    @State private var dragOffsetY: CGFloat = 0
     @State private var promptPlaceholder: String
     @State private var undoStack: [String] = []
     @State private var redoStack: [String] = []
@@ -679,8 +671,9 @@ struct IOSQuickAddTaskCard: View {
         initialDate: Date = Calendar.current.startOfDay(for: Date()),
         editingItem: ResolvedTaskItem? = nil,
         embedGlassBackground: Bool = true,
-        immediateFocus: Bool = false,
+        immediateFocus: Bool = true,
         onCreatedTaskForFlight: ((ResolvedTaskItem, CGRect, CGRect) -> Void)? = nil,
+        onOpenDayDocument: ((String) -> Void)? = nil,
         onClose: @escaping () -> Void
     ) {
         self.store = store
@@ -688,6 +681,7 @@ struct IOSQuickAddTaskCard: View {
         self.embedGlassBackground = embedGlassBackground
         self.immediateFocus = immediateFocus
         self.onCreatedTaskForFlight = onCreatedTaskForFlight
+        self.onOpenDayDocument = onOpenDayDocument
         self.onClose = onClose
         let idx = Self.promptCursor % Self.prompts.count
         Self.promptCursor += 1
@@ -729,7 +723,16 @@ struct IOSQuickAddTaskCard: View {
     private let allowedRepeats: [RepeatFrequency] = [.daily, .weekly, .monthly]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Spacer()
+                Capsule()
+                    .fill(Color.primary.opacity(0.20))
+                    .frame(width: 34, height: 4)
+                Spacer()
+            }
+            .padding(.top, -6)
+
             // 1. Top bar: When to schedule (Today, Tomorrow, Open Calendar) + Close
             HStack {
                 Menu {
@@ -835,6 +838,27 @@ struct IOSQuickAddTaskCard: View {
         }
         .padding(18)
         .modifier(OptionalComposerGlassModifier(enabled: embedGlassBackground))
+        .offset(y: dragOffsetY)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    let dy = value.translation.height
+                    dragOffsetY = dy > 0 ? dy : dy * 0.18
+                }
+                .onEnded { value in
+                    let dy = value.translation.height
+                    let predicted = value.predictedEndTranslation.height
+                    if dy > 52 || predicted > 105 {
+                        IOSHaptics.shared.tap()
+                        dragOffsetY = 0
+                        onClose()
+                    } else {
+                        withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
+                            dragOffsetY = 0
+                        }
+                    }
+                }
+        )
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .global)
         } action: { frame in
@@ -866,15 +890,7 @@ struct IOSQuickAddTaskCard: View {
             }
         }
         .onAppear {
-            if immediateFocus {
-                // Pre-trigger keyboard immediately during reverse bubble-to-composer edit flight
-                isFocused = true
-            } else {
-                // Give iOS 26's native GlassEffectContainer morph ~240ms to expand before the keyboard rises
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
-                    isFocused = true
-                }
-            }
+            isFocused = true
         }
     }
 
@@ -1045,19 +1061,27 @@ struct IOSQuickAddTaskCard: View {
 
             Spacer()
 
-            Button {
-                saveAndClose()
-            } label: {
-                Text(isEditing ? "Done" : "Add")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(isDarkMode && store.settings.accentColor == .graphite ? Color.black : .white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 9)
-                    .background(Capsule().fill(resolvedAccent))
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(RowePressScaleStyle())
-            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachedImagesBase64.isEmpty)
+            Text(isEditing ? "Done" : "Add")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(store.settings.accentColor.prefersDarkForeground(isDark: isDarkMode) ? Color.black : .white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(resolvedAccent))
+                .opacity((text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachedImagesBase64.isEmpty && !isEditing) ? 0.55 : 1.0)
+                .contentShape(Capsule())
+                .onTapGesture {
+                    saveAndClose()
+                }
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    IOSHaptics.shared.snap()
+                    let targetDocId: String
+                    if let item = editingItem {
+                        targetDocId = item.documentId
+                    } else {
+                        targetDocId = store.ensureTaskDayDocument(for: scheduleDate).id
+                    }
+                    onOpenDayDocument?(targetDocId)
+                }
         }
     }
 

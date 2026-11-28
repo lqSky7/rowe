@@ -37,7 +37,7 @@ struct QuickOpenPanel: View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             var list: [QuickOpenItem] = [.newDocument]
-            list.append(contentsOf: store.documents.filter { !$0.isTrashed }.prefix(8).map { .recentDoc($0) })
+            list.append(contentsOf: store.visibleDocuments.filter { !$0.isTrashed }.prefix(8).map { .recentDoc($0) })
             return list
         }
 
