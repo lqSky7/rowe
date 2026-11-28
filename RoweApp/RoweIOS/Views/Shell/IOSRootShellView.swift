@@ -364,25 +364,24 @@ struct IOSRootShellView: View {
         .onChange(of: store.settings.hasCompletedOnboarding) { _, completed in
             showOnboarding = !completed
         }
-        .onChange(of: store.isSyncing) { _, syncing in
+        .onChange(of: store.manualSyncWaveId) { _, _ in
             guard store.isSignedIn,
                   !store.settings.reduceAnimations,
-                  store.settings.crazySyncAnimation else { return }
-            if syncing {
-                // Never fire the sync shader during a local task upsync or active bubble flight!
-                guard !store.hasPendingCloudSync, flightCoordinator.activeFlight == nil else { return }
-                downsyncWaveCoordinator.beginConverging(
-                    isDarkMode: isDarkMode,
-                    sourceView: flightCoordinator.snapshotSourceView
-                )
-            } else {
+                  store.settings.crazySyncAnimation,
+                  flightCoordinator.activeFlight == nil else { return }
+            downsyncWaveCoordinator.beginConverging(
+                isDarkMode: isDarkMode,
+                sourceView: flightCoordinator.snapshotSourceView
+            )
+        }
+        .onChange(of: store.isSyncing) { _, syncing in
+            if !syncing {
                 downsyncWaveCoordinator.finishConvergingIfIdle()
             }
         }
         .onChange(of: store.downsyncWaveId) { _, _ in
             guard !store.settings.reduceAnimations,
-                  store.settings.crazySyncAnimation,
-                  !store.downsyncedTaskIds.isEmpty else { return }
+                  store.settings.crazySyncAnimation else { return }
             downsyncWaveCoordinator.trigger(
                 taskIds: store.downsyncedTaskIds,
                 isDarkMode: isDarkMode,

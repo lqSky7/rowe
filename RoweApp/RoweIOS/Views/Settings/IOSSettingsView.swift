@@ -503,7 +503,7 @@ private struct IOSAccountSettingsView: View {
                 if store.isSignedIn {
                     Button {
                         IOSHaptics.shared.tap()
-                        Task { await store.syncWithBackend() }
+                        store.triggerManualSync()
                     } label: {
                         HStack {
                             Text("Sync Now (\(store.authSession?.serverURL ?? ""))")

@@ -385,6 +385,8 @@ public struct Block: Identifiable, Codable, Hashable, Sendable {
     public var collectionData: CollectionData?
     public var subblocks: [Block]
     public var updatedAt: Date
+    public var deletedAt: Date?
+    public var sortOrder: Double?
 
     public init(
         id: String = UUID().uuidString,
@@ -413,7 +415,9 @@ public struct Block: Identifiable, Codable, Hashable, Sendable {
         tableData: TableData? = nil,
         collectionData: CollectionData? = nil,
         subblocks: [Block] = [],
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        deletedAt: Date? = nil,
+        sortOrder: Double? = nil
     ) {
         self.id = id
         self.documentId = documentId
@@ -442,6 +446,8 @@ public struct Block: Identifiable, Codable, Hashable, Sendable {
         self.collectionData = collectionData
         self.subblocks = subblocks
         self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
+        self.sortOrder = sortOrder
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -449,7 +455,7 @@ public struct Block: Identifiable, Codable, Hashable, Sendable {
         case indentLevel, alignment, decoration, color, fontOverride
         case isBold, isItalic, isStrikethrough, isInlineCode, isToggleExpanded
         case separatorStyle, codeLanguage, urlString, fileName
-        case task, tableData, collectionData, subblocks, updatedAt
+        case task, tableData, collectionData, subblocks, updatedAt, deletedAt, sortOrder
     }
 
     public init(from decoder: Decoder) throws {
@@ -482,13 +488,34 @@ public struct Block: Identifiable, Codable, Hashable, Sendable {
         collectionData = try c.decodeIfPresent(CollectionData.self, forKey: .collectionData)
         subblocks = try c.decodeIfPresent([Block].self, forKey: .subblocks) ?? []
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+        deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
+        sortOrder = try c.decodeIfPresent(Double.self, forKey: .sortOrder)
+    }
+
+    public var effectiveSortOrder: Double {
+        sortOrder ?? updatedAt.timeIntervalSince1970
+    }
+
+    /// Strict total order for tasks across all devices (commutative & deterministic).
+    public static func canonicalTaskOrderComparator(_ a: Block, _ b: Block) -> Bool {
+        let oa = a.effectiveSortOrder
+        let ob = b.effectiveSortOrder
+        if abs(oa - ob) > 1e-9 {
+            return oa < ob
+        }
+        return a.id < b.id
     }
 
     public var isHeadingForTOC: Bool {
-        kind == .text && (textStyle == .title || textStyle == .subtitle || textStyle == .heading || textStyle == .pageRegular || textStyle == .pageCard)
+        deletedAt == nil && kind == .text && (textStyle == .title || textStyle == .subtitle || textStyle == .heading || textStyle == .pageRegular || textStyle == .pageCard)
     }
 
     public var isTask: Bool {
+        deletedAt == nil && (listStyle == .todo || task != nil)
+    }
+
+    /// True for both live tasks and tombstoned (soft-deleted) task blocks.
+    public var isTaskOrTombstone: Bool {
         listStyle == .todo || task != nil
     }
 

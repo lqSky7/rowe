@@ -80,7 +80,7 @@ struct IOSCalendarTasksView: View {
                             Divider()
                             Button("Sync Now", systemImage: "arrow.triangle.2.circlepath") {
                                 IOSHaptics.shared.tap()
-                                store.triggerSyncNow()
+                                store.triggerManualSync()
                             }
                             Button("Add Task", systemImage: "plus") { onOpenQuickAdd(nil) }
                         } label: {

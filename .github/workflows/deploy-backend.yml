@@ -26,9 +26,12 @@ jobs:
           go-version: "1.24"
           cache-dependency-path: RoweServer/go.mod
 
-      - name: Run RoweServer tests
+      - name: Install SQLite3 dev headers for CGO tests
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Run RoweServer tests (with race detector)
         working-directory: RoweServer
-        run: go test -v ./...
+        run: CGO_ENABLED=1 go test -race -v ./...
 
       - name: Configure SSH
         env:

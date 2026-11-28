@@ -477,6 +477,7 @@ struct TaskEditorPopover: View {
     private func commitAndClose() {
         if existingItem != nil {
             persistExistingChanges()
+            store.flushPendingSyncImmediately()
             onClose()
             return
         } else {

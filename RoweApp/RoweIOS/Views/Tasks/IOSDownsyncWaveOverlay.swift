@@ -28,11 +28,7 @@ final class IOSDownsyncWaveCoordinator {
     @ObservationIgnored private var launchTask: Task<Void, Never>?
     @ObservationIgnored private var revealTask: Task<Void, Never>?
     @ObservationIgnored private var cleanupTask: Task<Void, Never>?
-    @ObservationIgnored private var lastConvergeTriggerAt: Date = .distantPast
-    @ObservationIgnored private var lastExpandTriggerAt: Date = .distantPast
 
-    static let convergeCooldown: TimeInterval = 12.0
-    static let expandCooldown: TimeInterval = 6.0
     static let convergeDuration: TimeInterval = 0.56
     static let convergeFadeOutDuration: TimeInterval = 0.34
     static let waveDuration: TimeInterval = 1.05
@@ -44,16 +40,11 @@ final class IOSDownsyncWaveCoordinator {
         pendingRevealTaskIds.contains(blockId)
     }
 
-    /// Phase 1: Starts the top-converging rainbow + upward distortion when syncing starts.
+    /// Phase 1: Manual-sync-only converging rainbow + upward distortion.
     func beginConverging(isDarkMode: Bool, sourceView: UIView?) {
         if case .expanding = activePhase { return }
-        if !pendingRevealTaskIds.isEmpty { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastConvergeTriggerAt) >= Self.convergeCooldown,
-              now.timeIntervalSince(lastExpandTriggerAt) >= Self.convergeCooldown else { return }
-        lastConvergeTriggerAt = now
-
         cleanupTask?.cancel()
+        let now = Date()
         let snap = Self.captureSnapshot(from: sourceView)
         let id = UUID()
         activePhase = .converging(
@@ -71,9 +62,8 @@ final class IOSDownsyncWaveCoordinator {
         }
     }
 
-    /// Gracefully fades out Phase 1 when sync finishes without new downsynced tasks.
+    /// Gracefully fades out Phase 1 when manual sync finishes without task changes.
     func finishConvergingIfIdle() {
-        // Never cancel Phase 1 if we are actively staging a downsync reveal!
         guard pendingRevealTaskIds.isEmpty else { return }
         guard case .converging(let id, let startTime, let existingFade, let isDarkMode, let snap) = activePhase,
               existingFade == nil else { return }
@@ -95,46 +85,21 @@ final class IOSDownsyncWaveCoordinator {
         }
     }
 
-    /// Full ~2.05s Downsync Reveal:
-    /// Immediately hides newly arrived tasks, guarantees the full Phase 1 converging rainbow plays,
-    /// then launches Phase 2 expanding white-rainbow wave and smoothly reveals the tasks right as it sweeps in.
+    /// Phase 2: Expanding soft-white wave with rainbow halo when tasks are added, updated, or deleted.
     func trigger(
         taskIds: Set<String>,
         isDarkMode: Bool,
         sourceView: UIView?
     ) {
-        guard !taskIds.isEmpty else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastExpandTriggerAt) >= Self.expandCooldown else { return }
-        lastExpandTriggerAt = now
-        lastConvergeTriggerAt = now
         launchTask?.cancel()
         revealTask?.cancel()
         cleanupTask?.cancel()
 
-        // Immediately hide newly downsynced tasks so they NEVER pop in before the wave!
         pendingRevealTaskIds = taskIds
         highlightedTaskIds = []
 
-        // Guarantee full Phase 1 converging rainbow (~0.56s) even when backend responded in 40ms
-        let remainingConverge: TimeInterval
-        if case .converging(_, let startTime, nil, _, _) = activePhase {
-            let elapsed = Date().timeIntervalSince(startTime)
-            remainingConverge = max(0.05, Self.convergeDuration - elapsed)
-        } else {
-            let snap = Self.captureSnapshot(from: sourceView)
-            activePhase = .converging(
-                id: UUID(),
-                startTime: Date(),
-                fadeOutStartTime: nil,
-                isDarkMode: isDarkMode,
-                backdropSnapshot: snap
-            )
-            remainingConverge = Self.convergeDuration
-        }
-
         launchTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(remainingConverge * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: 32_000_000)
             guard !Task.isCancelled, let self else { return }
 
             let snap = Self.captureSnapshot(from: sourceView)

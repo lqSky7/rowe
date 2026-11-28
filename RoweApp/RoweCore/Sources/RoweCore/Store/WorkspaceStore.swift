@@ -143,6 +143,7 @@ public final class WorkspaceStore {
     public var lastSuccessfulSyncAt: Date?
     public var syncPulseId: UUID = UUID()
     public var syncPulseDirection: SyncPulseDirection? = nil
+    public var manualSyncWaveId: UUID = UUID()
     public var downsyncWaveId: UUID = UUID()
     public var downsyncedTaskIds: Set<String> = []
     public var hasLoadedFromDisk: Bool = false
@@ -556,7 +557,7 @@ public final class WorkspaceStore {
         var visible: [Block] = []
         var collapsedIndentFloor: Int? = nil
 
-        for block in doc.blocks {
+        for block in doc.blocks where block.deletedAt == nil {
             if let floor = collapsedIndentFloor {
                 if block.indentLevel > floor {
                     continue
@@ -1009,20 +1010,36 @@ public final class WorkspaceStore {
     public func deleteBlocks(in docId: String, blockIds: Set<String>) {
         guard !blockIds.isEmpty else { return }
         var fallbackBlock: Block?
+        var deletedAnyTask = false
+        let now = Date()
         mutateBlocks(in: docId) { blocks in
             let firstRemovedIdx = blocks.firstIndex(where: { blockIds.contains($0.id) }) ?? 0
-            blocks.removeAll(where: { blockIds.contains($0.id) })
-            for id in blockIds {
-                _ = Self.removeBlockRecursive(in: &blocks, id: id)
+            // Tombstone task blocks instead of hard-removing them so CRDT merge propagates deletions
+            // across offline devices without resurrecting deleted tasks.
+            for idx in blocks.indices where blockIds.contains(blocks[idx].id) {
+                if blocks[idx].isTaskOrTombstone {
+                    blocks[idx].deletedAt = now
+                    blocks[idx].updatedAt = now
+                    deletedAnyTask = true
+                }
             }
-            if blocks.isEmpty {
+            blocks.removeAll(where: { blockIds.contains($0.id) && !$0.isTaskOrTombstone })
+            for id in blockIds {
+                _ = Self.tombstoneOrRemoveBlockRecursive(in: &blocks, id: id, now: now, deletedTask: &deletedAnyTask)
+            }
+            let liveBlocks = blocks.filter { $0.deletedAt == nil }
+            if liveBlocks.isEmpty {
                 let fresh = Block(documentId: docId, content: "")
                 blocks.append(fresh)
                 fallbackBlock = fresh
             } else {
-                let safeIdx = max(0, min(firstRemovedIdx - 1, blocks.count - 1))
-                fallbackBlock = blocks[safeIdx]
+                let safeIdx = max(0, min(firstRemovedIdx - 1, liveBlocks.count - 1))
+                fallbackBlock = liveBlocks[safeIdx]
             }
+        }
+        if deletedAnyTask {
+            scheduleDebouncedCloudSync(delayOverride: 0.05)
+            onTaskMutatedForLiveSync?("Task deleted")
         }
         selectedBlockIds.removeAll()
         if let fb = fallbackBlock {
@@ -1628,6 +1645,30 @@ public final class WorkspaceStore {
         }
     }
 
+    /// Explicit user-initiated sync (macOS ⌘R, iOS Calendar/Settings Sync Now).
+    /// Emits `manualSyncWaveId` so the converging sync-up animation ONLY plays on manual syncs.
+    public func triggerManualSync() {
+        guard isSignedIn else { return }
+        manualSyncWaveId = UUID()
+        Task { @MainActor [weak self] in
+            await self?.syncWithBackend()
+        }
+    }
+
+    /// Immediately flushes any pending local edits to disk and cloud (called on macOS resign/terminate/popover close).
+    public func flushPendingSyncImmediately() {
+        let snapshot = makeSnapshot()
+        Task {
+            await database.flushNow(snapshot)
+        }
+        guard isSignedIn, !dirtyDocumentIds.isEmpty || !pendingRemoteDeleteIds.isEmpty else { return }
+        syncDebounceTask?.cancel()
+        syncDebounceTask = nil
+        Task { @MainActor [weak self] in
+            await self?.syncWithBackend()
+        }
+    }
+
     public func handleAppBecameActive() {
         if isSignedIn {
             // Always restart SSE on foreground resume so dead background sockets reconnect immediately.
@@ -2021,19 +2062,21 @@ public final class WorkspaceStore {
                 syncPulseId = UUID()
                 rebuildSearchIndex()
                 if !forceFullPull && previousWatermark > 0 {
-                    var newlyChangedTaskIds: Set<String> = []
-                    for item in allTasks() {
-                        let afterFP = Self.taskSyncFingerprint(for: item.block)
-                        if let beforeFP = tasksBeforePull[item.block.id] {
+                    let afterTasks = Dictionary(allTasks().map { ($0.block.id, Self.taskSyncFingerprint(for: $0.block)) }, uniquingKeysWith: { first, _ in first })
+                    var addedOrUpdatedTaskIds: Set<String> = []
+                    for (id, afterFP) in afterTasks {
+                        if let beforeFP = tasksBeforePull[id] {
                             if beforeFP != afterFP {
-                                newlyChangedTaskIds.insert(item.block.id)
+                                addedOrUpdatedTaskIds.insert(id)
                             }
                         } else {
-                            newlyChangedTaskIds.insert(item.block.id)
+                            addedOrUpdatedTaskIds.insert(id)
                         }
                     }
-                    if !newlyChangedTaskIds.isEmpty {
-                        downsyncedTaskIds = newlyChangedTaskIds
+                    let deletedTaskIds = Set(tasksBeforePull.keys).subtracting(afterTasks.keys)
+                    // Play downsync wave ONLY when tasks were added, updated, or deleted (never for non-task changes)
+                    if !addedOrUpdatedTaskIds.isEmpty || !deletedTaskIds.isEmpty {
+                        downsyncedTaskIds = addedOrUpdatedTaskIds
                         downsyncWaveId = UUID()
                     }
                 }
@@ -2128,26 +2171,50 @@ public final class WorkspaceStore {
                 let remoteUpdated = r.updatedAt ?? Date.distantPast
                 let localDoc = documents[idx]
                 let isLocalDirty = localDirtyIds.contains(r.id)
-                // Ignore 1s-overlap echoes of a server timestamp we already know when local doc has fresh unpushed edits
                 if isLocalDirty, let knownServerTs = lastServerUpdatedAtByDoc[r.id], knownServerTs == remoteUpdated {
                     continue
                 }
                 if let rTs = r.updatedAt {
                     lastServerUpdatedAtByDoc[r.id] = rTs
                 }
+
+                var decodedRemoteBlocks: [Block]? = nil
+                if !r.isLocked, let raw = r.payloadJson?.data(using: .utf8),
+                   let decoded = try? decoder.decode([Block].self, from: raw) {
+                    decodedRemoteBlocks = decoded
+                }
+
+                let isTaskContainer = localDoc.title == "Tasks Inbox" || r.title == "Tasks Inbox"
+                    || localDoc.blocks.contains(where: \.isTaskOrTombstone)
+                    || (decodedRemoteBlocks?.contains(where: \.isTaskOrTombstone) ?? false)
+
+                if isTaskContainer && !r.isLocked, let remoteBlocks = decodedRemoteBlocks {
+                    // True per-task CRDT merge: NEVER fork Tasks Inbox into (Sync Conflict) and NEVER drop tasks
+                    // created or edited on either device. Each block resolves by newest updatedAt + tombstones.
+                    let merged = Self.mergeTaskBlocksCRDT(local: localDoc.blocks, remote: remoteBlocks, documentId: localDoc.id)
+                    documents[idx].blocks = merged
+                    documents[idx].encryptedPayload = nil
+                    documents[idx].title = r.title.isEmpty ? localDoc.title : r.title
+                    documents[idx].folderId = (r.folderId?.isEmpty == false) ? r.folderId : localDoc.folderId
+                    documents[idx].isStarred = r.isStarred || localDoc.isStarred
+                    documents[idx].isTrashed = r.isTrashed
+                    documents[idx].updatedAt = max(localDoc.updatedAt, remoteUpdated)
+                    if merged != remoteBlocks {
+                        // Local device contributed newer/additional tasks or tombstones — push merged union back.
+                        dirtyDocumentIds.insert(localDoc.id)
+                        dirtyDocumentVersions[localDoc.id, default: 0] &+= 1
+                    }
+                    continue
+                }
+
                 let bothEdited = isLocalDirty && remoteUpdated > localDoc.updatedAt
                 if bothEdited {
-                    var conflictBlocks: [Block] = []
-                    if !r.isLocked, let raw = r.payloadJson?.data(using: .utf8),
-                       let decoded = try? decoder.decode([Block].self, from: raw) {
-                        conflictBlocks = decoded
-                    }
                     let conflictDoc = RoweDocument(
                         id: UUID().uuidString,
                         spaceId: localDoc.spaceId,
                         folderId: localDoc.folderId,
                         title: "\(r.title.isEmpty ? localDoc.displayTitle : r.title) (Sync Conflict)",
-                        blocks: conflictBlocks,
+                        blocks: decodedRemoteBlocks ?? [],
                         style: localDoc.style,
                         isLocked: r.isLocked,
                         encryptedPayload: r.isLocked ? r.encryptedPayload : nil,
@@ -2167,8 +2234,7 @@ public final class WorkspaceStore {
                         if !unlockedDocumentIds.contains(r.id) {
                             documents[idx].blocks = []
                         }
-                    } else if let raw = r.payloadJson?.data(using: .utf8),
-                              let decoded = try? decoder.decode([Block].self, from: raw) {
+                    } else if let decoded = decodedRemoteBlocks {
                         documents[idx].blocks = decoded
                         documents[idx].encryptedPayload = nil
                     }
@@ -2198,35 +2264,90 @@ public final class WorkspaceStore {
         deduplicateInboxAndSeedDocuments()
     }
 
-    /// Merges duplicate "Tasks Inbox" documents (which previously got different random UUIDs on macOS vs iOS)
-    /// and removes duplicate task blocks so tasks never double across devices.
+    /// Deterministic per-block CRDT merge for task containers:
+    /// - Resolves same-ID blocks by newest `updatedAt` (with deterministic tombstone/state tie-breaker).
+    /// - Preserves unique blocks created on either device so offline tasks are never overwritten.
+    /// - Garbage-collects tombstones older than 30 days.
+    private static func mergeTaskBlocksCRDT(local: [Block], remote: [Block], documentId: String) -> [Block] {
+        var byId: [String: Block] = [:]
+        var orderedIds: [String] = []
+
+        func pickWinner(_ a: Block, _ b: Block) -> Block {
+            let delta = a.updatedAt.timeIntervalSince(b.updatedAt)
+            if abs(delta) > 0.001 {
+                return delta > 0 ? a : b
+            }
+            if (a.deletedAt != nil) != (b.deletedAt != nil) {
+                return a.deletedAt != nil ? a : b
+            }
+            let aState = a.task?.state.rawValue ?? 0
+            let bState = b.task?.state.rawValue ?? 0
+            if aState != bState {
+                return aState > bState ? a : b
+            }
+            return a.content >= b.content ? a : b
+        }
+
+        for var blk in local {
+            blk.documentId = documentId
+            if let existing = byId[blk.id] {
+                byId[blk.id] = pickWinner(existing, blk)
+            } else {
+                byId[blk.id] = blk
+                orderedIds.append(blk.id)
+            }
+        }
+        for var blk in remote {
+            blk.documentId = documentId
+            if let existing = byId[blk.id] {
+                byId[blk.id] = pickWinner(existing, blk)
+            } else {
+                byId[blk.id] = blk
+                orderedIds.append(blk.id)
+            }
+        }
+
+        let tombstoneCutoff = Date().addingTimeInterval(-30 * 86400)
+        return orderedIds.compactMap { id in
+            guard let blk = byId[id] else { return nil }
+            if let del = blk.deletedAt, del < tombstoneCutoff { return nil }
+            return blk
+        }
+    }
+
+    /// Merges duplicate "Tasks Inbox" AND any legacy "Tasks Inbox (Sync Conflict)" documents via CRDT
+    /// so tasks never double across devices.
     private func deduplicateInboxAndSeedDocuments() {
         let inboxIndices = documents.indices.filter {
-            documents[$0].title == "Tasks Inbox" && !documents[$0].isTrashed
+            !documents[$0].isTrashed && (documents[$0].title == "Tasks Inbox" || documents[$0].title.hasPrefix("Tasks Inbox (Sync Conflict)"))
         }
         if !inboxIndices.isEmpty {
-            // Prefer the deterministic seed ID if present, otherwise the first inbox document
-            let canonicalIdx = inboxIndices.first(where: { documents[$0].id == "rowe-seed-inbox" }) ?? inboxIndices[0]
+            let canonicalIdx = inboxIndices.first(where: { documents[$0].id == "rowe-seed-inbox" })
+                ?? inboxIndices.first(where: { documents[$0].title == "Tasks Inbox" })
+                ?? inboxIndices[0]
             let canonicalId = documents[canonicalIdx].id
             var mergedBlocks = documents[canonicalIdx].blocks
             var duplicateIdsToRemove: [String] = []
 
             for idx in inboxIndices where idx != canonicalIdx {
-                mergedBlocks.append(contentsOf: documents[idx].blocks)
+                mergedBlocks = Self.mergeTaskBlocksCRDT(local: mergedBlocks, remote: documents[idx].blocks, documentId: canonicalId)
                 duplicateIdsToRemove.append(documents[idx].id)
             }
 
             let deduped = deduplicatedTaskBlocks(mergedBlocks, documentId: canonicalId)
-            let changed = !duplicateIdsToRemove.isEmpty || deduped.count != documents[canonicalIdx].blocks.count
+            let changed = !duplicateIdsToRemove.isEmpty || deduped != documents[canonicalIdx].blocks
             if changed {
+                documents[canonicalIdx].title = "Tasks Inbox"
                 documents[canonicalIdx].blocks = deduped
                 documents[canonicalIdx].updatedAt = Date()
                 if !duplicateIdsToRemove.isEmpty {
                     let removeSet = Set(duplicateIdsToRemove)
                     documents.removeAll(where: { removeSet.contains($0.id) })
                     dirtyDocumentIds.insert(canonicalId)
+                    dirtyDocumentVersions[canonicalId, default: 0] &+= 1
                     if authSession != nil {
                         for dupId in duplicateIdsToRemove {
+                            pendingRemoteDeleteIds.insert(dupId)
                             Task { await deleteRemoteDocument(docId: dupId) }
                         }
                     }
@@ -2681,13 +2802,19 @@ public final class WorkspaceStore {
         return false
     }
 
-    private static func removeBlockRecursive(in blocks: inout [Block], id: String) -> Bool {
+    private static func tombstoneOrRemoveBlockRecursive(in blocks: inout [Block], id: String, now: Date, deletedTask: inout Bool) -> Bool {
         if let idx = blocks.firstIndex(where: { $0.id == id }) {
-            blocks.remove(at: idx)
+            if blocks[idx].isTaskOrTombstone {
+                blocks[idx].deletedAt = now
+                blocks[idx].updatedAt = now
+                deletedTask = true
+            } else {
+                blocks.remove(at: idx)
+            }
             return true
         }
         for idx in blocks.indices {
-            if removeBlockRecursive(in: &blocks[idx].subblocks, id: id) {
+            if tombstoneOrRemoveBlockRecursive(in: &blocks[idx].subblocks, id: id, now: now, deletedTask: &deletedTask) {
                 return true
             }
         }

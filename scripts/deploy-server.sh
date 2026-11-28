@@ -26,7 +26,11 @@ EOF
   chmod 600 .env
 fi
 
-docker compose up -d --build --remove-orphans
+echo "==> Building image (runs full Go test suite before compiling)..."
+docker compose build
+
+echo "==> Starting updated container..."
+docker compose up -d --remove-orphans
 
 for i in $(seq 1 20); do
   if curl -fsS http://127.0.0.1:8090/healthz >/dev/null 2>&1; then

@@ -29,11 +29,7 @@ final class MacDownsyncWaveCoordinator {
     @ObservationIgnored private var launchTask: Task<Void, Never>?
     @ObservationIgnored private var revealTask: Task<Void, Never>?
     @ObservationIgnored private var cleanupTask: Task<Void, Never>?
-    @ObservationIgnored private var lastConvergeTriggerAt: Date = .distantPast
-    @ObservationIgnored private var lastExpandTriggerAt: Date = .distantPast
 
-    static let convergeCooldown: TimeInterval = 12.0
-    static let expandCooldown: TimeInterval = 6.0
     static let convergeDuration: TimeInterval = 0.56
     static let convergeFadeOutDuration: TimeInterval = 0.34
     static let waveDuration: TimeInterval = 1.05
@@ -45,15 +41,11 @@ final class MacDownsyncWaveCoordinator {
         pendingRevealTaskIds.contains(blockId)
     }
 
+    /// Phase 1: Manual-sync-only (⌘R) converging rainbow + upward distortion.
     func beginConverging(isDarkMode: Bool) {
         if case .expanding = activePhase { return }
-        if !pendingRevealTaskIds.isEmpty { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastConvergeTriggerAt) >= Self.convergeCooldown,
-              now.timeIntervalSince(lastExpandTriggerAt) >= Self.convergeCooldown else { return }
-        lastConvergeTriggerAt = now
-
         cleanupTask?.cancel()
+        let now = Date()
         let snap = Self.captureWindowSnapshot()
         let id = UUID()
         activePhase = .converging(
@@ -93,39 +85,17 @@ final class MacDownsyncWaveCoordinator {
         }
     }
 
+    /// Phase 2: Expanding soft-white wave with rainbow halo when tasks are added, updated, or deleted.
     func trigger(taskIds: Set<String>, isDarkMode: Bool) {
-        guard !taskIds.isEmpty else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastExpandTriggerAt) >= Self.expandCooldown else { return }
-        lastExpandTriggerAt = now
-        lastConvergeTriggerAt = now
         launchTask?.cancel()
         revealTask?.cancel()
         cleanupTask?.cancel()
 
-        // Immediately hide newly downsynced tasks so they NEVER appear before the wave
         pendingRevealTaskIds = taskIds
         highlightedTaskIds = []
 
-        // Guarantee full Phase 1 converging rainbow (~0.56s) even when backend responded quickly
-        let remainingConverge: TimeInterval
-        if case .converging(_, let startTime, nil, _, _) = activePhase {
-            let elapsed = Date().timeIntervalSince(startTime)
-            remainingConverge = max(0.05, Self.convergeDuration - elapsed)
-        } else {
-            let snap = Self.captureWindowSnapshot()
-            activePhase = .converging(
-                id: UUID(),
-                startTime: Date(),
-                fadeOutStartTime: nil,
-                isDarkMode: isDarkMode,
-                backdropCGImage: snap
-            )
-            remainingConverge = Self.convergeDuration
-        }
-
         launchTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(remainingConverge * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: 32_000_000)
             guard !Task.isCancelled, let self else { return }
 
             let snap = Self.captureWindowSnapshot()

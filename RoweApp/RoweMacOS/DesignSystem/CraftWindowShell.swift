@@ -247,22 +247,21 @@ struct CraftWindowShell: View {
                 showOnboarding = !completed
             }
         }
-        .onChange(of: store.isSyncing) { _, syncing in
+        .onChange(of: store.manualSyncWaveId) { _, _ in
             guard store.isSignedIn,
                   !store.settings.reduceAnimations,
-                  store.settings.crazySyncAnimation else { return }
-            if syncing {
-                // Never fire the sync shader during a local task upsync or active bubble flight
-                guard !store.hasPendingCloudSync, taskFlightCoordinator.activeFlight == nil else { return }
-                downsyncWaveCoordinator.beginConverging(isDarkMode: isDarkAppearance)
-            } else {
+                  store.settings.crazySyncAnimation,
+                  taskFlightCoordinator.activeFlight == nil else { return }
+            downsyncWaveCoordinator.beginConverging(isDarkMode: isDarkAppearance)
+        }
+        .onChange(of: store.isSyncing) { _, syncing in
+            if !syncing {
                 downsyncWaveCoordinator.finishConvergingIfIdle()
             }
         }
         .onChange(of: store.downsyncWaveId) { _, _ in
             guard !store.settings.reduceAnimations,
-                  store.settings.crazySyncAnimation,
-                  !store.downsyncedTaskIds.isEmpty else { return }
+                  store.settings.crazySyncAnimation else { return }
             downsyncWaveCoordinator.trigger(
                 taskIds: store.downsyncedTaskIds,
                 isDarkMode: isDarkAppearance
@@ -286,6 +285,12 @@ struct CraftWindowShell: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.handleAppBecameActive()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            store.flushPendingSyncImmediately()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            store.flushPendingSyncImmediately()
         }
         .onDisappear {
             if let m = globalKeyMonitor {
@@ -442,7 +447,7 @@ struct CraftWindowShell: View {
         store.leftSidebarWidth = snapped
     }
 
-    /// Guarantees ⌘[ (sidebar toggle) and ⌘L (new task on Calendar) fire reliably from any responder.
+    /// Guarantees ⌘[ (sidebar toggle), ⌘L (new task), and ⌘R (manual sync) fire reliably from any responder.
     private func installGlobalShortcutMonitor() {
         if let existing = globalKeyMonitor {
             NSEvent.removeMonitor(existing)
@@ -466,6 +471,12 @@ struct CraftWindowShell: View {
                         store.activeTaskEditor = .create(defaultDate: Calendar.current.startOfDay(for: Date()))
                     }
                 }
+                return nil
+            }
+            if mods == .command, (event.keyCode == 15 || event.charactersIgnoringModifiers?.lowercased() == "r") {
+                guard store.isSignedIn else { return nil }
+                HapticsManager.shared.tap()
+                store.triggerManualSync()
                 return nil
             }
             return event

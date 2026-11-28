@@ -5,6 +5,7 @@ WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
+RUN CGO_ENABLED=1 go test -v ./...
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/rowe-server ./cmd/server
 
 FROM alpine:3.21

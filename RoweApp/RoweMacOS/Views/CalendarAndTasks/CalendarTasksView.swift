@@ -70,9 +70,12 @@ struct CalendarTasksView: View {
 
                     let allTasks = store.allTasks()
                     ForEach(visibleDays, id: \.self) { day in
+                        let isToday = calendar.isDateInToday(day)
                         let dayTasks = allTasks.filter { item in
-                            guard let sched = item.block.task?.scheduleDate else { return false }
-                            return calendar.isDate(sched, inSameDayAs: day)
+                            if let sched = item.block.task?.scheduleDate {
+                                return calendar.isDate(sched, inSameDayAs: day)
+                            }
+                            return isToday
                         }
                         dayCard(for: day, tasks: dayTasks)
                     }

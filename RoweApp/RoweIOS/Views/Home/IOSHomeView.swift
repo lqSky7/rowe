@@ -64,7 +64,7 @@ struct IOSHomeView: View {
                         Divider()
                         Button(store.isSignedIn ? "Sync Now" : "Sign In to Sync", systemImage: "arrow.triangle.2.circlepath") {
                             if store.isSignedIn {
-                                Task { await store.syncWithBackend() }
+                                store.triggerManualSync()
                             } else {
                                 store.isLoginSheetPresented = true
                             }
