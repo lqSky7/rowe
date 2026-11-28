@@ -18,6 +18,15 @@
       "category": "productivity",
       "versions": [
         {
+          "version": "1.0.12",
+          "buildVersion": "13",
+          "date": "2026-11-28",
+          "localizedDescription": "Version 1.0.12.",
+          "downloadURL": "https://github.com/lqSky7/rowe/releases/download/ios-v1.0.12/Rowe-1.0.12.ipa",
+          "size": 7316727,
+          "minOSVersion": "18.0"
+        },
+        {
           "version": "1.0.11",
           "buildVersion": "12",
           "date": "2026-11-28",
